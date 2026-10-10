@@ -43,6 +43,9 @@ supabase db push
 
 Migration `002_create_profile_on_signup.sql` creates a profile from signup
 metadata inside Supabase. Apply it before enabling registration in the app.
+Migration `003_fix_workspace_members_rls_recursion.sql` fixes recursive
+workspace membership policies. Apply all migrations in order to an existing
+Supabase project (`supabase db push` or the SQL Editor).
 
 ### 2. Verify RLS
 

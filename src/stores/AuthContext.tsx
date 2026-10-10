@@ -50,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
     if (!error && data) {
       setState(s => ({ ...s, profile: data as Profile }));
     }
@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('user_vaults')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
     
     if (!error && data) {
       setState(s => ({

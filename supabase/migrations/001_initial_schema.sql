@@ -234,6 +234,41 @@ ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
 -- PHASE 3: Create RLS policies (all tables exist now)
 -- ═══════════════════════════════════════════════════════════════════
 
+-- SECURITY DEFINER avoids recursive workspace_members RLS checks when
+-- policies need to verify the caller's membership or role.
+CREATE OR REPLACE FUNCTION public.has_workspace_role(
+  target_workspace_id UUID,
+  allowed_roles TEXT[]
+)
+RETURNS BOOLEAN
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT
+    EXISTS (
+      SELECT 1
+      FROM public.workspace_members AS wm
+      WHERE wm.workspace_id = target_workspace_id
+        AND wm.user_id = (SELECT auth.uid())
+        AND wm.role = ANY (allowed_roles)
+    )
+    OR (
+      'owner' = ANY (allowed_roles)
+      AND EXISTS (
+        SELECT 1
+        FROM public.workspaces AS w
+        WHERE w.id = target_workspace_id
+          AND w.owner_id = (SELECT auth.uid())
+      )
+    );
+$$;
+
+REVOKE ALL ON FUNCTION public.has_workspace_role(UUID, TEXT[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.has_workspace_role(UUID, TEXT[]) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.has_workspace_role(UUID, TEXT[]) TO service_role;
+
 -- ─── Profiles Policies ──────────────────────────────────────────────
 DROP POLICY IF EXISTS "profiles_select_own" ON profiles;
 DROP POLICY IF EXISTS "profiles_update_own" ON profiles;
@@ -318,36 +353,33 @@ DROP POLICY IF EXISTS "workspace_members_delete_admin" ON workspace_members;
 
 CREATE POLICY "workspace_members_select" ON workspace_members
   FOR SELECT USING (
-    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
+    public.has_workspace_role(
+      workspace_id,
+      ARRAY['owner', 'admin', 'developer', 'viewer']::TEXT[]
+    )
   );
 
 CREATE POLICY "workspace_members_insert_admin" ON workspace_members
   FOR INSERT WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = workspace_members.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role IN ('owner', 'admin')
+    public.has_workspace_role(
+      workspace_id,
+      ARRAY['owner', 'admin']::TEXT[]
     )
   );
 
 CREATE POLICY "workspace_members_update_owner" ON workspace_members
   FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = workspace_members.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role = 'owner'
+    public.has_workspace_role(
+      workspace_id,
+      ARRAY['owner']::TEXT[]
     )
   );
 
 CREATE POLICY "workspace_members_delete_admin" ON workspace_members
   FOR DELETE USING (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = workspace_members.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role IN ('owner', 'admin')
+    public.has_workspace_role(
+      workspace_id,
+      ARRAY['owner', 'admin']::TEXT[]
     )
     AND user_id != auth.uid()
   );
