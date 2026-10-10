@@ -46,6 +46,9 @@ metadata inside Supabase. Apply it before enabling registration in the app.
 Migration `003_fix_workspace_members_rls_recursion.sql` fixes recursive
 workspace membership policies. Apply all migrations in order to an existing
 Supabase project (`supabase db push` or the SQL Editor).
+Migration `004_repair_workspace_policies_and_create_project.sql` also removes
+any leftover recursive workspace policies and adds an atomic project-creation
+function that creates the project, owner membership, and default environments.
 
 ### 2. Verify RLS
 
