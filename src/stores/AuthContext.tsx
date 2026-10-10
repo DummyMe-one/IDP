@@ -166,10 +166,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const encPrivKey = await CryptoService.encryptPrivateKey(keyPair.privateKey, vaultKey);
       const recoveryBundle = await CryptoService.createRecoveryBundle(vaultKey, recoveryKey);
 
-      // Store in Supabase
+      // Store in Supabase - combine ciphertext + nonce into single field
+      const vaultPayload = JSON.stringify({
+        ciphertext: vaultData.encryptedVaultKey,
+        nonce: vaultData.nonce,
+      });
       const { error: vaultError } = await supabase.from('user_vaults').insert({
         user_id: state.user.id,
-        encrypted_vault_key: vaultData.encryptedVaultKey,
+        encrypted_vault_key: vaultPayload,
         kdf_salt: vaultData.salt,
         kdf_algorithm: 'argon2id',
         kdf_version: 1,
@@ -214,11 +218,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error || !vaultData) return { error: 'Vault not found' };
 
+      // Parse the vault payload to get ciphertext and nonce
+      let ciphertext: string;
+      let nonce: string;
+      try {
+        const payload = JSON.parse((vaultData as UserVault).encrypted_vault_key);
+        ciphertext = payload.ciphertext;
+        nonce = payload.nonce;
+      } catch {
+        // Legacy format - nonce was not stored
+        return { error: 'Vault data format is outdated. Please reset your vault.' };
+      }
+
       const vaultKey = await CryptoService.unlockVault(
         passphrase,
-        (vaultData as UserVault).encrypted_vault_key,
+        ciphertext,
         (vaultData as UserVault).kdf_salt,
-        '' // nonce is embedded in the encrypted key
+        nonce
       );
 
       // Decrypt private key
