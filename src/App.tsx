@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/stores/AuthContext';
 import { WorkspaceProvider } from '@/stores/WorkspaceContext';
+
+const LandingPage = lazy(() => import('@/pages/LandingPage'));
 import {
   LayoutDashboard, FolderKanban, Shield, GitBranch, CheckSquare, Users,
   Settings, LogOut, Lock, Unlock, ChevronLeft, ChevronRight, Bell,
@@ -1102,7 +1104,7 @@ function VaultUnlockModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
 // ─── App Router ─────────────────────────────────────────────────────
 function AppRouter() {
   const [showVaultModal, setShowVaultModal] = useState(false);
-  const { vault, isOnboarded, user } = useAuth();
+  const { vault, isOnboarded, user, isLoading } = useAuth();
   const navigate = useNavigate();
 
   // Show vault unlock modal when vault is initialized but locked
@@ -1111,6 +1113,15 @@ function AppRouter() {
       // First time - redirect to onboarding
     }
   }, [user, vault, isOnboarded]);
+
+  // Show landing page for unauthenticated users
+  if (!isLoading && !user) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <LandingPage />
+      </Suspense>
+    );
+  }
 
   return (
     <>
