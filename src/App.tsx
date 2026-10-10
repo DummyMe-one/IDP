@@ -1116,23 +1116,30 @@ function AppRouter() {
     }
   }, [user, vault, isOnboarded]);
 
-  // Show landing page for unauthenticated users
-  if (!isLoading && !user) {
-    return (
-      <Suspense fallback={<LoadingScreen />}>
-        <LandingPage />
-      </Suspense>
-    );
+  if (isLoading) {
+    return <LoadingScreen />;
   }
 
   return (
     <>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        {/* Landing page for unauthenticated users */}
+        {!user && (
+          <Route path="/" element={
+            <Suspense fallback={<LoadingScreen />}>
+              <LandingPage />
+            </Suspense>
+          } />
+        )}
+        
+        {/* Auth pages */}
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+        <Route path="/register" element={user ? <Navigate to="/" replace /> : <RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        
+        {/* Protected routes */}
         <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
-        <Route path="/" element={<ProtectedRoute><AppLayout><DashboardPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/dashboard" element={<ProtectedRoute><AppLayout><DashboardPage /></AppLayout></ProtectedRoute>} />
         <Route path="/workspaces" element={<ProtectedRoute><AppLayout><WorkspacesPage /></AppLayout></ProtectedRoute>} />
         <Route path="/projects" element={<ProtectedRoute><AppLayout><ProjectsPage /></AppLayout></ProtectedRoute>} />
         <Route path="/environments" element={<ProtectedRoute><AppLayout><EnvironmentsPage /></AppLayout></ProtectedRoute>} />
@@ -1142,6 +1149,10 @@ function AppRouter() {
         <Route path="/integrations" element={<ProtectedRoute><AppLayout><IntegrationsPage /></AppLayout></ProtectedRoute>} />
         <Route path="/activity" element={<ProtectedRoute><AppLayout><ActivityPage /></AppLayout></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />
+        
+        {/* Redirect authenticated users from root to dashboard */}
+        {user && <Route path="/" element={<Navigate to="/dashboard" replace />} />}
+        
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <VaultUnlockModal isOpen={showVaultModal} onClose={() => setShowVaultModal(false)} />
