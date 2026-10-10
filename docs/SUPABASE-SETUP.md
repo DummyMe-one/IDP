@@ -23,6 +23,11 @@ For CI/CD, set these as repository variables (not secrets):
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
 - `VITE_BASE_PATH`
 
+If either value is missing or still a placeholder, the site deploys a setup notice
+instead of attempting signup against an invalid endpoint. After setting both
+variables, run the Pages workflow again. The publishable key is intended for browser
+use; never put a service-role or secret key in a `VITE_` variable.
+
 ## Database Setup
 
 ### 1. Apply Migrations
@@ -33,8 +38,14 @@ supabase link --project-ref your-project-ref
 supabase db push
 
 # Or manually via SQL editor
-# Copy contents of supabase/migrations/001_initial_schema.sql
+# Run every SQL file in supabase/migrations in filename order
 ```
+
+Migration `002_create_profile_on_signup.sql` creates a profile from signup
+metadata inside Supabase. Apply it before enabling registration in the app.
+Migration `003_fix_workspace_members_rls_recursion.sql` fixes recursive
+workspace membership policies. Apply all migrations in order to an existing
+Supabase project (`supabase db push` or the SQL Editor).
 
 ### 2. Verify RLS
 
@@ -56,8 +67,14 @@ Enable email auth in Supabase Dashboard:
 ### 4. Configure Auth Callbacks
 
 Set the site URL and redirect URLs:
-- Site URL: `https://your-domain.github.io/your-repo/`
-- Redirect URLs: `https://your-domain.github.io/your-repo/**`
+- Site URL: `https://dummyme-one.github.io/IDP/`
+- Redirect URLs: `https://dummyme-one.github.io/IDP/**`
+
+Signup explicitly redirects email confirmation to the current site URL. For the
+GitHub Pages deployment, the confirmation link should return to
+`https://dummyme-one.github.io/IDP/`, not `localhost`. Keep that URL in the
+Supabase redirect allow list; the local development URL can be added separately
+if you test signup locally.
 
 ## Auth Configuration
 

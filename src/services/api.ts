@@ -20,11 +20,12 @@ export async function createWorkspace(name: string, description: string | null, 
   if (error) throw error;
 
   // Add owner as member
-  await supabase.from('workspace_members').insert({
+  const { error: memberError } = await supabase.from('workspace_members').insert({
     workspace_id: workspace.id,
     user_id: ownerId,
     role: 'owner',
   });
+  if (memberError) throw memberError;
 
   // Log audit event
   await logAuditEvent({
