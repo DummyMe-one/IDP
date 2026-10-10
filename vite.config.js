@@ -6,12 +6,19 @@ import path from "path";
 export default defineConfig(({ mode }) => {
 const env = loadEnv(mode, process.cwd(), "");
 
+const basePath = env.VITE_BASE_PATH || "/";
+
 return {
-plugins: [react(), tailwindcss()],
+plugins: [
+react(),
+tailwindcss(),
+],
 
 ```
-// GitHub Pages repository path, configured through VITE_BASE_PATH
-base: env.VITE_BASE_PATH || "/",
+// GitHub Pages base path
+// Example: /IDP/ for https://username.github.io/IDP/
+// Use / for a custom domain or username.github.io root site
+base: basePath.endsWith("/") ? basePath : `${basePath}/`,
 
 resolve: {
   alias: {
@@ -31,6 +38,7 @@ server: {
 build: {
   outDir: "dist",
   sourcemap: false,
+  emptyOutDir: true,
 },
 ```
 
