@@ -8,7 +8,7 @@ In your GitHub repository:
 - Settings → Pages → Source: GitHub Actions
 - Settings → Variables → Add:
   - `VITE_SUPABASE_URL` = your Supabase URL
-  - `VITE_SUPABASE_PUBLISHABLE_KEY` = your anon key
+  - `VITE_SUPABASE_PUBLISHABLE_KEY` = your publishable (anon) key
   - `VITE_BASE_PATH` = `/your-repo-name/` (or `/` for user/org pages)
 
 ### 2. Base Path Configuration
@@ -34,6 +34,10 @@ The workflow (`.github/workflows/deploy.yml`):
 5. Validates output (dist/index.html exists)
 6. Uploads Pages artifact
 7. Deploys via `actions/deploy-pages`
+
+This is the only workflow that should deploy the site. Uploading the repository
+root instead of `dist` publishes the unbuilt `index.html`, whose `/src/main.tsx`
+entry point is not available on GitHub Pages.
 
 ## Routing
 

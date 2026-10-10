@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/stores/AuthContext';
 import { WorkspaceProvider } from '@/stores/WorkspaceContext';
+import { isSupabaseConfigured } from '@/lib/supabase/client';
 
 const LandingPage = lazy(() => import('@/pages/LandingPage'));
 const ConnectionStatusLazy = lazy(() => import('@/components/ConnectionStatus'));
@@ -1161,7 +1162,44 @@ function AppRouter() {
 }
 
 // ─── Root App ───────────────────────────────────────────────────────
+function SupabaseConfigurationRequired() {
+  return (
+    <main className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-6">
+      <section className="w-full max-w-xl rounded-2xl border border-amber-200 bg-white p-8 shadow-xl dark:border-amber-900 dark:bg-slate-900">
+        <div className="mb-4 flex items-center gap-3">
+          <AlertTriangle className="h-7 w-7 text-amber-600 dark:text-amber-400" />
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-white">Authentication is not configured</h1>
+        </div>
+        <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+          Sign-up and sign-in are unavailable until this site is connected to a Supabase project.
+          Add the following GitHub repository variables, then run the Pages deployment again:
+        </p>
+        <ul className="my-4 list-disc space-y-2 pl-6 text-sm text-slate-700 dark:text-slate-200">
+          <li><code>VITE_SUPABASE_URL</code> - your Supabase project URL</li>
+          <li><code>VITE_SUPABASE_PUBLISHABLE_KEY</code> - your Supabase publishable (anon) key</li>
+        </ul>
+        <div className="flex flex-wrap gap-3">
+          <a
+            href="https://github.com/DummyMe-one/IDP/settings/variables/actions"
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            Configure repository variables
+          </a>
+          <a
+            href="https://github.com/DummyMe-one/IDP/blob/main/docs/SUPABASE-SETUP.md"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            Supabase setup guide
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export default function App() {
+  if (!isSupabaseConfigured) return <SupabaseConfigurationRequired />;
+
   return (
     <AuthProvider>
       <WorkspaceProvider>

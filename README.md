@@ -59,7 +59,7 @@ npm run dev
    ```bash
    supabase db push
    ```
-   Or copy `supabase/migrations/001_initial_schema.sql` into the SQL editor.
+   Or run each SQL file in `supabase/migrations` in filename order in the SQL editor.
 3. Enable email authentication
 4. Configure auth callback URLs for hash routing
 5. Note your project URL and anon key
