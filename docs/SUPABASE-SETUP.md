@@ -23,6 +23,11 @@ For CI/CD, set these as repository variables (not secrets):
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
 - `VITE_BASE_PATH`
 
+If either value is missing or still a placeholder, the site deploys a setup notice
+instead of attempting signup against an invalid endpoint. After setting both
+variables, run the Pages workflow again. The publishable key is intended for browser
+use; never put a service-role or secret key in a `VITE_` variable.
+
 ## Database Setup
 
 ### 1. Apply Migrations

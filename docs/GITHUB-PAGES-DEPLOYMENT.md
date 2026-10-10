@@ -8,7 +8,7 @@ In your GitHub repository:
 - Settings → Pages → Source: GitHub Actions
 - Settings → Variables → Add:
   - `VITE_SUPABASE_URL` = your Supabase URL
-  - `VITE_SUPABASE_PUBLISHABLE_KEY` = your anon key
+  - `VITE_SUPABASE_PUBLISHABLE_KEY` = your publishable (anon) key
   - `VITE_BASE_PATH` = `/your-repo-name/` (or `/` for user/org pages)
 
 ### 2. Base Path Configuration

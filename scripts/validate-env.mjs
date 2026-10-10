@@ -13,14 +13,30 @@ let hasErrors = false;
 console.log('🔍 Validating environment variables...\n');
 
 for (const key of required) {
-  const value = process.env[key];
+  const value = process.env[key]?.trim();
   if (!value) {
     console.log(`  ❌ ${key} is not set (required)`);
     hasErrors = true;
-  } else if (value.includes('placeholder') || value === '') {
-    console.log(`  ⚠️  ${key} appears to be a placeholder value`);
   } else {
-    console.log(`  ✅ ${key} is set`);
+    const isPlaceholder = /placeholder|your-project|your-anon-key/i.test(value);
+    if (isPlaceholder) {
+      console.log(`  ❌ ${key} contains a placeholder value`);
+      hasErrors = true;
+      continue;
+    }
+
+    if (key === 'VITE_SUPABASE_URL') {
+      try {
+        const url = new URL(value);
+        if (url.protocol !== 'https:') throw new Error('URL must use HTTPS');
+      } catch {
+        console.log(`  ❌ ${key} must be a valid HTTPS URL`);
+        hasErrors = true;
+        continue;
+      }
+    }
+
+    console.log(`  ✅ ${key} is configured`);
   }
 }
 
