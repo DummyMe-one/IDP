@@ -1,10 +1,14 @@
 -- Supabase Migration: 001_initial_schema.sql
 -- Internal Developer Portal - Database Schema
--- Enable RLS on all tables
+-- Fixed: All tables created first, then RLS policies added after
 
 -- ─── Extensions ─────────────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ═══════════════════════════════════════════════════════════════════
+-- PHASE 1: Create all tables (no policies yet)
+-- ═══════════════════════════════════════════════════════════════════
 
 -- ─── Profiles ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS profiles (
@@ -15,17 +19,6 @@ CREATE TABLE IF NOT EXISTS profiles (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own profile" ON profiles
-  FOR SELECT USING (auth.uid() = id);
-
-CREATE POLICY "Users can update own profile" ON profiles
-  FOR UPDATE USING (auth.uid() = id);
-
-CREATE POLICY "System can insert profiles" ON profiles
-  FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- ─── User Vaults ────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_vaults (
@@ -43,17 +36,6 @@ CREATE TABLE IF NOT EXISTS user_vaults (
   UNIQUE(user_id)
 );
 
-ALTER TABLE user_vaults ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own vault" ON user_vaults
-  FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own vault" ON user_vaults
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own vault" ON user_vaults
-  FOR UPDATE USING (auth.uid() = user_id);
-
 -- ─── User Crypto Keys ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_crypto_keys (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -65,28 +47,6 @@ CREATE TABLE IF NOT EXISTS user_crypto_keys (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(user_id)
 );
-
-ALTER TABLE user_crypto_keys ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own crypto keys" ON user_crypto_keys
-  FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own crypto keys" ON user_crypto_keys
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own crypto keys" ON user_crypto_keys
-  FOR UPDATE USING (auth.uid() = user_id);
-
--- Allow workspace/project members to read public keys of other members
-CREATE POLICY "Members can view public keys of co-members" ON user_crypto_keys
-  FOR SELECT USING (
-    user_id IN (
-      SELECT wm.user_id FROM workspace_members wm
-      WHERE wm.workspace_id IN (
-        SELECT wm2.workspace_id FROM workspace_members wm2 WHERE wm2.user_id = auth.uid()
-      )
-    )
-  );
 
 -- ─── Workspaces ─────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -100,26 +60,6 @@ CREATE TABLE IF NOT EXISTS workspaces (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Members can view workspaces" ON workspaces
-  FOR SELECT USING (
-    id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
-    OR owner_id = auth.uid()
-  );
-
-CREATE POLICY "Authenticated users can create workspaces" ON workspaces
-  FOR INSERT WITH CHECK (auth.uid() = owner_id);
-
-CREATE POLICY "Owners and admins can update workspaces" ON workspaces
-  FOR UPDATE USING (
-    owner_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM workspace_members
-      WHERE workspace_id = workspaces.id AND user_id = auth.uid() AND role IN ('owner', 'admin')
-    )
-  );
-
 -- ─── Workspace Members ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS workspace_members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -129,44 +69,6 @@ CREATE TABLE IF NOT EXISTS workspace_members (
   joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(workspace_id, user_id)
 );
-
-ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Members can view workspace members" ON workspace_members
-  FOR SELECT USING (
-    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
-  );
-
-CREATE POLICY "Owners and admins can manage members" ON workspace_members
-  FOR INSERT WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = workspace_members.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role IN ('owner', 'admin')
-    )
-  );
-
-CREATE POLICY "Owners can update member roles" ON workspace_members
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = workspace_members.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role = 'owner'
-    )
-  );
-
-CREATE POLICY "Owners and admins can remove members" ON workspace_members
-  FOR DELETE USING (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = workspace_members.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role IN ('owner', 'admin')
-    )
-    AND user_id != auth.uid()
-  );
 
 -- ─── Workspace Invitations ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS workspace_invitations (
@@ -180,33 +82,6 @@ CREATE TABLE IF NOT EXISTS workspace_invitations (
   invited_by UUID NOT NULL REFERENCES auth.users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-ALTER TABLE workspace_invitations ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Members can view invitations" ON workspace_invitations
-  FOR SELECT USING (
-    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
-  );
-
-CREATE POLICY "Owners and admins can create invitations" ON workspace_invitations
-  FOR INSERT WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = workspace_invitations.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role IN ('owner', 'admin')
-    )
-  );
-
-CREATE POLICY "Owners and admins can update invitations" ON workspace_invitations
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = workspace_invitations.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role IN ('owner', 'admin')
-    )
-  );
 
 -- ─── Projects ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS projects (
@@ -225,28 +100,6 @@ CREATE TABLE IF NOT EXISTS projects (
   UNIQUE(workspace_id, slug)
 );
 
-ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Workspace members can view projects" ON projects
-  FOR SELECT USING (
-    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
-  );
-
-CREATE POLICY "Workspace members can create projects" ON projects
-  FOR INSERT WITH CHECK (
-    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid() AND role IN ('owner', 'admin', 'developer'))
-  );
-
-CREATE POLICY "Project members can update projects" ON projects
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM workspace_members wm
-      WHERE wm.workspace_id = projects.workspace_id
-      AND wm.user_id = auth.uid()
-      AND wm.role IN ('owner', 'admin', 'developer')
-    )
-  );
-
 -- ─── Project Members ────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS project_members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -256,17 +109,6 @@ CREATE TABLE IF NOT EXISTS project_members (
   joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(project_id, user_id)
 );
-
-ALTER TABLE project_members ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Project members can view members" ON project_members
-  FOR SELECT USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid()
-    )
-  );
 
 -- ─── Project Key Envelopes ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS project_key_envelopes (
@@ -280,31 +122,6 @@ CREATE TABLE IF NOT EXISTS project_key_envelopes (
   UNIQUE(project_id, user_id)
 );
 
-ALTER TABLE project_key_envelopes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own project key envelopes" ON project_key_envelopes
-  FOR SELECT USING (user_id = auth.uid());
-
-CREATE POLICY "Project owners can create envelopes" ON project_key_envelopes
-  FOR INSERT WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM project_members pm
-      WHERE pm.project_id = project_key_envelopes.project_id
-      AND pm.user_id = auth.uid()
-      AND pm.role IN ('owner', 'admin')
-    )
-  );
-
-CREATE POLICY "Project owners can update envelopes" ON project_key_envelopes
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM project_members pm
-      WHERE pm.project_id = project_key_envelopes.project_id
-      AND pm.user_id = auth.uid()
-      AND pm.role IN ('owner', 'admin')
-    )
-  );
-
 -- ─── Environments ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS environments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -317,35 +134,6 @@ CREATE TABLE IF NOT EXISTS environments (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(project_id, name)
 );
-
-ALTER TABLE environments ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Project members can view environments" ON environments
-  FOR SELECT USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Project developers can manage environments" ON environments
-  FOR INSERT WITH CHECK (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
-    )
-  );
-
-CREATE POLICY "Project developers can update environments" ON environments
-  FOR UPDATE USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
-    )
-  );
 
 -- ─── Encrypted Secrets ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS encrypted_secrets (
@@ -363,44 +151,6 @@ CREATE TABLE IF NOT EXISTS encrypted_secrets (
   UNIQUE(environment_id, variable_name)
 );
 
-ALTER TABLE encrypted_secrets ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Project members can view secrets" ON encrypted_secrets
-  FOR SELECT USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Project developers can manage secrets" ON encrypted_secrets
-  FOR INSERT WITH CHECK (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
-    )
-  );
-
-CREATE POLICY "Project developers can update secrets" ON encrypted_secrets
-  FOR UPDATE USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
-    )
-  );
-
-CREATE POLICY "Project developers can delete secrets" ON encrypted_secrets
-  FOR DELETE USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
-    )
-  );
-
 -- ─── Branches ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS branches (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -417,26 +167,6 @@ CREATE TABLE IF NOT EXISTS branches (
   UNIQUE(project_id, name)
 );
 
-ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Project members can view branches" ON branches
-  FOR SELECT USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Project developers can manage branches" ON branches
-  FOR ALL USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
-    )
-  );
-
 -- ─── Tasks ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -450,26 +180,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Project members can view tasks" ON tasks
-  FOR SELECT USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Project developers can manage tasks" ON tasks
-  FOR ALL USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
-    )
-  );
 
 -- ─── Integration Connections ────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS integration_connections (
@@ -486,26 +196,6 @@ CREATE TABLE IF NOT EXISTS integration_connections (
   UNIQUE(project_id, provider)
 );
 
-ALTER TABLE integration_connections ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Project members can view integrations" ON integration_connections
-  FOR SELECT USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Project admins can manage integrations" ON integration_connections
-  FOR ALL USING (
-    project_id IN (
-      SELECT p.id FROM projects p
-      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin')
-    )
-  );
-
 -- ─── Audit Events ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS audit_events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -520,9 +210,494 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ═══════════════════════════════════════════════════════════════════
+-- PHASE 2: Enable RLS on all tables
+-- ═══════════════════════════════════════════════════════════════════
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_vaults ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_crypto_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspace_invitations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_key_envelopes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE environments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE encrypted_secrets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE integration_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Members can view workspace audit events" ON audit_events
+-- ═══════════════════════════════════════════════════════════════════
+-- PHASE 3: Create RLS policies (all tables exist now)
+-- ═══════════════════════════════════════════════════════════════════
+
+-- ─── Profiles Policies ──────────────────────────────────────────────
+DROP POLICY IF EXISTS "profiles_select_own" ON profiles;
+DROP POLICY IF EXISTS "profiles_update_own" ON profiles;
+DROP POLICY IF EXISTS "profiles_insert_own" ON profiles;
+
+CREATE POLICY "profiles_select_own" ON profiles
+  FOR SELECT USING (auth.uid() = id);
+
+CREATE POLICY "profiles_update_own" ON profiles
+  FOR UPDATE USING (auth.uid() = id);
+
+CREATE POLICY "profiles_insert_own" ON profiles
+  FOR INSERT WITH CHECK (auth.uid() = id);
+
+-- ─── User Vaults Policies ───────────────────────────────────────────
+DROP POLICY IF EXISTS "user_vaults_select_own" ON user_vaults;
+DROP POLICY IF EXISTS "user_vaults_insert_own" ON user_vaults;
+DROP POLICY IF EXISTS "user_vaults_update_own" ON user_vaults;
+
+CREATE POLICY "user_vaults_select_own" ON user_vaults
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "user_vaults_insert_own" ON user_vaults
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "user_vaults_update_own" ON user_vaults
+  FOR UPDATE USING (auth.uid() = user_id);
+
+-- ─── User Crypto Keys Policies ──────────────────────────────────────
+DROP POLICY IF EXISTS "user_crypto_keys_select_own" ON user_crypto_keys;
+DROP POLICY IF EXISTS "user_crypto_keys_insert_own" ON user_crypto_keys;
+DROP POLICY IF EXISTS "user_crypto_keys_update_own" ON user_crypto_keys;
+DROP POLICY IF EXISTS "user_crypto_keys_select_comembers" ON user_crypto_keys;
+
+CREATE POLICY "user_crypto_keys_select_own" ON user_crypto_keys
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "user_crypto_keys_insert_own" ON user_crypto_keys
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "user_crypto_keys_update_own" ON user_crypto_keys
+  FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "user_crypto_keys_select_comembers" ON user_crypto_keys
+  FOR SELECT USING (
+    user_id IN (
+      SELECT wm.user_id FROM workspace_members wm
+      WHERE wm.workspace_id IN (
+        SELECT wm2.workspace_id FROM workspace_members wm2 WHERE wm2.user_id = auth.uid()
+      )
+    )
+  );
+
+-- ─── Workspaces Policies ────────────────────────────────────────────
+DROP POLICY IF EXISTS "workspaces_select_members" ON workspaces;
+DROP POLICY IF EXISTS "workspaces_insert_auth" ON workspaces;
+DROP POLICY IF EXISTS "workspaces_update_admin" ON workspaces;
+
+CREATE POLICY "workspaces_select_members" ON workspaces
+  FOR SELECT USING (
+    id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
+    OR owner_id = auth.uid()
+  );
+
+CREATE POLICY "workspaces_insert_auth" ON workspaces
+  FOR INSERT WITH CHECK (auth.uid() = owner_id);
+
+CREATE POLICY "workspaces_update_admin" ON workspaces
+  FOR UPDATE USING (
+    owner_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM workspace_members
+      WHERE workspace_id = workspaces.id AND user_id = auth.uid() AND role IN ('owner', 'admin')
+    )
+  );
+
+-- ─── Workspace Members Policies ─────────────────────────────────────
+DROP POLICY IF EXISTS "workspace_members_select" ON workspace_members;
+DROP POLICY IF EXISTS "workspace_members_insert_admin" ON workspace_members;
+DROP POLICY IF EXISTS "workspace_members_update_owner" ON workspace_members;
+DROP POLICY IF EXISTS "workspace_members_delete_admin" ON workspace_members;
+
+CREATE POLICY "workspace_members_select" ON workspace_members
+  FOR SELECT USING (
+    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "workspace_members_insert_admin" ON workspace_members
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM workspace_members wm
+      WHERE wm.workspace_id = workspace_members.workspace_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+CREATE POLICY "workspace_members_update_owner" ON workspace_members
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM workspace_members wm
+      WHERE wm.workspace_id = workspace_members.workspace_id
+      AND wm.user_id = auth.uid()
+      AND wm.role = 'owner'
+    )
+  );
+
+CREATE POLICY "workspace_members_delete_admin" ON workspace_members
+  FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM workspace_members wm
+      WHERE wm.workspace_id = workspace_members.workspace_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin')
+    )
+    AND user_id != auth.uid()
+  );
+
+-- ─── Workspace Invitations Policies ─────────────────────────────────
+DROP POLICY IF EXISTS "workspace_invitations_select" ON workspace_invitations;
+DROP POLICY IF EXISTS "workspace_invitations_insert_admin" ON workspace_invitations;
+DROP POLICY IF EXISTS "workspace_invitations_update_admin" ON workspace_invitations;
+
+CREATE POLICY "workspace_invitations_select" ON workspace_invitations
+  FOR SELECT USING (
+    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "workspace_invitations_insert_admin" ON workspace_invitations
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM workspace_members wm
+      WHERE wm.workspace_id = workspace_invitations.workspace_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+CREATE POLICY "workspace_invitations_update_admin" ON workspace_invitations
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM workspace_members wm
+      WHERE wm.workspace_id = workspace_invitations.workspace_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+-- ─── Projects Policies ──────────────────────────────────────────────
+DROP POLICY IF EXISTS "projects_select_members" ON projects;
+DROP POLICY IF EXISTS "projects_insert_members" ON projects;
+DROP POLICY IF EXISTS "projects_update_members" ON projects;
+
+CREATE POLICY "projects_select_members" ON projects
+  FOR SELECT USING (
+    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "projects_insert_members" ON projects
+  FOR INSERT WITH CHECK (
+    workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid() AND role IN ('owner', 'admin', 'developer'))
+  );
+
+CREATE POLICY "projects_update_members" ON projects
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM workspace_members wm
+      WHERE wm.workspace_id = projects.workspace_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+-- ─── Project Members Policies ───────────────────────────────────────
+DROP POLICY IF EXISTS "project_members_select" ON project_members;
+DROP POLICY IF EXISTS "project_members_insert" ON project_members;
+DROP POLICY IF EXISTS "project_members_update" ON project_members;
+DROP POLICY IF EXISTS "project_members_delete" ON project_members;
+
+CREATE POLICY "project_members_select" ON project_members
+  FOR SELECT USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "project_members_insert" ON project_members
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE p.id = project_members.project_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "project_members_update" ON project_members
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE p.id = project_members.project_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+CREATE POLICY "project_members_delete" ON project_members
+  FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE p.id = project_members.project_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+-- ─── Project Key Envelopes Policies ─────────────────────────────────
+DROP POLICY IF EXISTS "project_key_envelopes_select_own" ON project_key_envelopes;
+DROP POLICY IF EXISTS "project_key_envelopes_insert_admin" ON project_key_envelopes;
+DROP POLICY IF EXISTS "project_key_envelopes_update_admin" ON project_key_envelopes;
+
+CREATE POLICY "project_key_envelopes_select_own" ON project_key_envelopes
+  FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "project_key_envelopes_insert_admin" ON project_key_envelopes
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM project_members pm
+      WHERE pm.project_id = project_key_envelopes.project_id
+      AND pm.user_id = auth.uid()
+      AND pm.role IN ('owner', 'admin')
+    )
+  );
+
+CREATE POLICY "project_key_envelopes_update_admin" ON project_key_envelopes
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM project_members pm
+      WHERE pm.project_id = project_key_envelopes.project_id
+      AND pm.user_id = auth.uid()
+      AND pm.role IN ('owner', 'admin')
+    )
+  );
+
+-- ─── Environments Policies ──────────────────────────────────────────
+DROP POLICY IF EXISTS "environments_select" ON environments;
+DROP POLICY IF EXISTS "environments_insert" ON environments;
+DROP POLICY IF EXISTS "environments_update" ON environments;
+DROP POLICY IF EXISTS "environments_delete" ON environments;
+
+CREATE POLICY "environments_select" ON environments
+  FOR SELECT USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "environments_insert" ON environments
+  FOR INSERT WITH CHECK (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "environments_update" ON environments
+  FOR UPDATE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "environments_delete" ON environments
+  FOR DELETE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+-- ─── Encrypted Secrets Policies ─────────────────────────────────────
+DROP POLICY IF EXISTS "encrypted_secrets_select" ON encrypted_secrets;
+DROP POLICY IF EXISTS "encrypted_secrets_insert" ON encrypted_secrets;
+DROP POLICY IF EXISTS "encrypted_secrets_update" ON encrypted_secrets;
+DROP POLICY IF EXISTS "encrypted_secrets_delete" ON encrypted_secrets;
+
+CREATE POLICY "encrypted_secrets_select" ON encrypted_secrets
+  FOR SELECT USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "encrypted_secrets_insert" ON encrypted_secrets
+  FOR INSERT WITH CHECK (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "encrypted_secrets_update" ON encrypted_secrets
+  FOR UPDATE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "encrypted_secrets_delete" ON encrypted_secrets
+  FOR DELETE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+-- ─── Branches Policies ──────────────────────────────────────────────
+DROP POLICY IF EXISTS "branches_select" ON branches;
+DROP POLICY IF EXISTS "branches_insert" ON branches;
+DROP POLICY IF EXISTS "branches_update" ON branches;
+DROP POLICY IF EXISTS "branches_delete" ON branches;
+
+CREATE POLICY "branches_select" ON branches
+  FOR SELECT USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "branches_insert" ON branches
+  FOR INSERT WITH CHECK (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "branches_update" ON branches
+  FOR UPDATE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "branches_delete" ON branches
+  FOR DELETE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+-- ─── Tasks Policies ─────────────────────────────────────────────────
+DROP POLICY IF EXISTS "tasks_select" ON tasks;
+DROP POLICY IF EXISTS "tasks_insert" ON tasks;
+DROP POLICY IF EXISTS "tasks_update" ON tasks;
+DROP POLICY IF EXISTS "tasks_delete" ON tasks;
+
+CREATE POLICY "tasks_select" ON tasks
+  FOR SELECT USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "tasks_insert" ON tasks
+  FOR INSERT WITH CHECK (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "tasks_update" ON tasks
+  FOR UPDATE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+CREATE POLICY "tasks_delete" ON tasks
+  FOR DELETE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin', 'developer')
+    )
+  );
+
+-- ─── Integration Connections Policies ───────────────────────────────
+DROP POLICY IF EXISTS "integration_connections_select" ON integration_connections;
+DROP POLICY IF EXISTS "integration_connections_insert" ON integration_connections;
+DROP POLICY IF EXISTS "integration_connections_update" ON integration_connections;
+DROP POLICY IF EXISTS "integration_connections_delete" ON integration_connections;
+
+CREATE POLICY "integration_connections_select" ON integration_connections
+  FOR SELECT USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "integration_connections_insert" ON integration_connections
+  FOR INSERT WITH CHECK (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+CREATE POLICY "integration_connections_update" ON integration_connections
+  FOR UPDATE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+CREATE POLICY "integration_connections_delete" ON integration_connections
+  FOR DELETE USING (
+    project_id IN (
+      SELECT p.id FROM projects p
+      JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+      WHERE wm.user_id = auth.uid() AND wm.role IN ('owner', 'admin')
+    )
+  );
+
+-- ─── Audit Events Policies ──────────────────────────────────────────
+DROP POLICY IF EXISTS "audit_events_select" ON audit_events;
+DROP POLICY IF EXISTS "audit_events_insert" ON audit_events;
+
+CREATE POLICY "audit_events_select" ON audit_events
   FOR SELECT USING (
     workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid())
     OR project_id IN (
@@ -532,10 +707,13 @@ CREATE POLICY "Members can view workspace audit events" ON audit_events
     )
   );
 
-CREATE POLICY "System can insert audit events" ON audit_events
+CREATE POLICY "audit_events_insert" ON audit_events
   FOR INSERT WITH CHECK (auth.uid() = actor_id);
 
--- ─── Indexes ────────────────────────────────────────────────────────
+-- ═══════════════════════════════════════════════════════════════════
+-- PHASE 4: Indexes
+-- ═══════════════════════════════════════════════════════════════════
+
 CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace ON workspace_members(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
@@ -554,7 +732,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at D
 CREATE INDEX IF NOT EXISTS idx_workspace_invitations_email ON workspace_invitations(email);
 CREATE INDEX IF NOT EXISTS idx_workspace_invitations_status ON workspace_invitations(status);
 
--- ─── Auto-update timestamps ────────────────────────────────────────
+-- ═══════════════════════════════════════════════════════════════════
+-- PHASE 5: Auto-update timestamps trigger
+-- ═══════════════════════════════════════════════════════════════════
+
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -562,6 +743,16 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Drop existing triggers if they exist (for re-runnability)
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
+DROP TRIGGER IF EXISTS update_workspaces_updated_at ON workspaces;
+DROP TRIGGER IF EXISTS update_projects_updated_at ON projects;
+DROP TRIGGER IF EXISTS update_environments_updated_at ON environments;
+DROP TRIGGER IF EXISTS update_encrypted_secrets_updated_at ON encrypted_secrets;
+DROP TRIGGER IF EXISTS update_branches_updated_at ON branches;
+DROP TRIGGER IF EXISTS update_tasks_updated_at ON tasks;
+DROP TRIGGER IF EXISTS update_integration_connections_updated_at ON integration_connections;
 
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 CREATE TRIGGER update_workspaces_updated_at BEFORE UPDATE ON workspaces FOR EACH ROW EXECUTE FUNCTION update_updated_at();
