@@ -5,26 +5,20 @@ import path from "path";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  
-  const basePath = env.VITE_BASE_PATH || "/";
-  
+
+  // GitHub Pages project sites must use the repository path as the base.
+  const basePath = env.VITE_BASE_PATH || "/IDP/";
+
   return {
-    plugins: [
-      react(),
-      tailwindcss(),
-    ],
-    
-    // GitHub Pages base path
-    // Example: /IDP/ for https://username.github.io/IDP/
-    // Use / for a custom domain or username.github.io root site
     base: basePath.endsWith("/") ? basePath : `${basePath}/`,
-    
+    plugins: [react(), tailwindcss()],
+
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
       },
     },
-    
+
     server: {
       host: "0.0.0.0",
       port: 3000,
@@ -33,7 +27,7 @@ export default defineConfig(({ mode }) => {
         port: 3000,
       },
     },
-    
+
     build: {
       outDir: "dist",
       sourcemap: false,
