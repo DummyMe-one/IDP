@@ -1,0 +1,12 @@
+-- Seed data for development/testing
+-- DO NOT use in production with real data
+
+-- This file intentionally contains no fake production data.
+-- To test the application:
+-- 1. Create a real Supabase project
+-- 2. Apply migrations from supabase/migrations/
+-- 3. Register users through the application UI
+-- 4. Create workspaces and projects through the UI
+--
+-- All sensitive data (secrets, keys) must be created through
+-- the authenticated application with proper encryption.
