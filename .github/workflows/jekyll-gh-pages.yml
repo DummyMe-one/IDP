@@ -1,0 +1,14 @@
+# This workflow is intentionally disabled.
+# The Vite-based deployment in deploy.yml is the active GitHub Pages workflow for this repo.
+# Keeping this file as manual-only prevents duplicate deployments.
+
+name: Deploy Jekyll with GitHub Pages dependencies preinstalled
+
+on:
+  workflow_dispatch:
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Jekyll workflow disabled. Use deploy.yml for GitHub Pages deployment."
