@@ -104,17 +104,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchProfile, checkVaultStatus]);
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return { error: error.message };
-    
-    if (data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
-        email: data.user.email!,
-        full_name: fullName,
-      });
-    }
-    return { error: null };
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName.trim() } },
+    });
+    return { error: error?.message ?? null };
   };
 
   const signIn = async (email: string, password: string) => {

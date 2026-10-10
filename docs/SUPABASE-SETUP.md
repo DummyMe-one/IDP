@@ -38,8 +38,11 @@ supabase link --project-ref your-project-ref
 supabase db push
 
 # Or manually via SQL editor
-# Copy contents of supabase/migrations/001_initial_schema.sql
+# Run every SQL file in supabase/migrations in filename order
 ```
+
+Migration `002_create_profile_on_signup.sql` creates a profile from signup
+metadata inside Supabase. Apply it before enabling registration in the app.
 
 ### 2. Verify RLS
 
