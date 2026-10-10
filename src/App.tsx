@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from '@/stores/AuthContext';
 import { WorkspaceProvider } from '@/stores/WorkspaceContext';
 
 const LandingPage = lazy(() => import('@/pages/LandingPage'));
+const ConnectionStatusLazy = lazy(() => import('@/components/ConnectionStatus'));
+const DatabaseSetupGuideLazy = lazy(() => import('@/components/DatabaseSetupGuide'));
 import {
   LayoutDashboard, FolderKanban, Shield, GitBranch, CheckSquare, Users,
   Settings, LogOut, Lock, Unlock, ChevronLeft, ChevronRight, Bell,
@@ -1156,6 +1158,16 @@ export default function App() {
           <AppRouter />
         </HashRouter>
       </WorkspaceProvider>
+      {/* Development-only connection status indicator */}
+      {import.meta.env.DEV && (
+        <Suspense fallback={null}>
+          <ConnectionStatusLazy />
+        </Suspense>
+      )}
+      {/* Database setup guide - shows when tables don't exist */}
+      <Suspense fallback={null}>
+        <DatabaseSetupGuideLazy />
+      </Suspense>
     </AuthProvider>
   );
 }
