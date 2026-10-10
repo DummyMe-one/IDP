@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [react(), tailwindcss()],
-    base: env.VITE_BASE_PATH || "/",
+    base: env.VITE_BASE_PATH || "/IDP/",
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
