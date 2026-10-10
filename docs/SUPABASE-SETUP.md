@@ -43,6 +43,9 @@ supabase db push
 
 Migration `002_create_profile_on_signup.sql` creates a profile from signup
 metadata inside Supabase. Apply it before enabling registration in the app.
+Migration `003_fix_workspace_members_rls_recursion.sql` fixes recursive
+workspace membership policies. Apply all migrations in order to an existing
+Supabase project (`supabase db push` or the SQL Editor).
 
 ### 2. Verify RLS
 
@@ -64,8 +67,14 @@ Enable email auth in Supabase Dashboard:
 ### 4. Configure Auth Callbacks
 
 Set the site URL and redirect URLs:
-- Site URL: `https://your-domain.github.io/your-repo/`
-- Redirect URLs: `https://your-domain.github.io/your-repo/**`
+- Site URL: `https://dummyme-one.github.io/IDP/`
+- Redirect URLs: `https://dummyme-one.github.io/IDP/**`
+
+Signup explicitly redirects email confirmation to the current site URL. For the
+GitHub Pages deployment, the confirmation link should return to
+`https://dummyme-one.github.io/IDP/`, not `localhost`. Keep that URL in the
+Supabase redirect allow list; the local development URL can be added separately
+if you test signup locally.
 
 ## Auth Configuration
 
