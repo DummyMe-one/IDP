@@ -1,8 +1,9 @@
 import React, { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/stores/AuthContext';
-import { WorkspaceProvider } from '@/stores/WorkspaceContext';
+import { WorkspaceProvider, useWorkspace } from '@/stores/WorkspaceContext';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
+import { createProject, createWorkspace, getProjects } from '@/services/api';
 
 const LandingPage = lazy(() => import('@/pages/LandingPage'));
 const ConnectionStatusLazy = lazy(() => import('@/components/ConnectionStatus'));
@@ -499,10 +500,33 @@ function SecurityStatusItem({ label, status, description }: { label: string; sta
 
 // ─── Workspaces Page ────────────────────────────────────────────────
 function WorkspacesPage() {
-  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const { user } = useAuth();
+  const { workspaces, isLoading, loadError, refresh, setActiveWorkspace } = useWorkspace();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleCreate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!user || !name.trim()) return;
+
+    setSaving(true);
+    setError('');
+    try {
+      const workspace = await createWorkspace(name.trim(), description.trim() || null, user.id);
+      await refresh();
+      setActiveWorkspace({ ...workspace, member_role: 'owner' });
+      setName('');
+      setDescription('');
+      setShowCreate(false);
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : 'Could not create workspace.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -517,27 +541,31 @@ function WorkspacesPage() {
       </div>
 
       {showCreate && (
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
+        <form onSubmit={handleCreate} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
           <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Create Workspace</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Name</label>
-              <input value={name} onChange={e => setName(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500" />
+              <input required value={name} onChange={e => setName(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
               <input value={description} onChange={e => setDescription(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
           </div>
+          {error && <p role="alert" className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
           <div className="flex gap-2 mt-4">
-            <button onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
-            <button className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm">Create</button>
+            <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
+            <button disabled={saving} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50">{saving ? 'Creating...' : 'Create'}</button>
           </div>
-        </div>
+        </form>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {workspaces.length === 0 ? (
+        {loadError && <p role="alert" className="col-span-full text-sm text-red-600 dark:text-red-400">{loadError}</p>}
+        {isLoading ? (
+          <p className="col-span-full text-sm text-slate-500">Loading workspaces...</p>
+        ) : workspaces.length === 0 ? (
           <div className="col-span-full">
             <EmptyState icon={Globe} title="No workspaces" description="Create a workspace to organize your projects and team" />
           </div>
@@ -560,6 +588,67 @@ function WorkspacesPage() {
 
 // ─── Projects Page ──────────────────────────────────────────────────
 function ProjectsPage() {
+  const { user } = useAuth();
+  const { workspaces, activeWorkspace, isLoading: workspacesLoading, loadError: workspacesError } = useWorkspace();
+  const [projects, setProjects] = useState<Awaited<ReturnType<typeof getProjects>>>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [repositoryUrl, setRepositoryUrl] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeWorkspace) {
+      setProjects([]);
+      return;
+    }
+
+    setProjectsLoading(true);
+    setError('');
+    getProjects(activeWorkspace.id)
+      .then(data => { if (!cancelled) setProjects(data); })
+      .catch(loadError => {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Could not load projects.');
+      })
+      .finally(() => { if (!cancelled) setProjectsLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [activeWorkspace?.id]);
+
+  const handleCreate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!user || !activeWorkspace || !name.trim()) return;
+
+    setSaving(true);
+    setError('');
+    try {
+      const project = await createProject(
+        activeWorkspace.id,
+        name.trim(),
+        description.trim() || null,
+        repositoryUrl.trim() || null,
+        user.id,
+      );
+      setProjects(current => [project, ...current]);
+      setName('');
+      setDescription('');
+      setRepositoryUrl('');
+      setShowCreate(false);
+    } catch (createError) {
+      const message = createError instanceof Error ? createError.message : 'Could not create project.';
+      setError(
+        message.includes('create_project_with_defaults')
+          ? 'Project setup is not installed in the database yet. Apply supabase/migrations/004_repair_workspace_policies_and_create_project.sql in the Supabase SQL Editor, then try again.'
+          : message,
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -567,13 +656,63 @@ function ProjectsPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Projects</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Manage your software projects</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition">
+        <button onClick={() => { setShowCreate(true); setError(''); }} disabled={!activeWorkspace} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition disabled:opacity-50" title={!activeWorkspace ? 'Create or select a workspace first' : undefined}>
           <Plus className="w-4 h-4" /> New Project
         </button>
       </div>
-      <EmptyState icon={FolderKanban} title="No projects yet" description="Create a project to start managing environments, secrets, and tasks" action={
-        <button className="mt-4 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">Create Project</button>
-      } />
+      {!workspacesLoading && workspaces.length === 0 ? (
+        <EmptyState icon={Globe} title="Create a workspace first" description="Projects belong to a workspace. Create one before adding a project." action={
+          <Link to="/workspaces" className="mt-4 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">Create Workspace</Link>
+        } />
+      ) : (
+        <>
+          {workspacesError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{workspacesError}</p>}
+          {activeWorkspace && <p className="text-sm text-slate-500 dark:text-slate-400">Workspace: <span className="font-medium text-slate-700 dark:text-slate-200">{activeWorkspace.name}</span></p>}
+          {showCreate && (
+            <form onSubmit={handleCreate} className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+              <h2 className="font-semibold text-slate-900 dark:text-white">Create Project</h2>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Name
+                  <input required value={name} onChange={event => setName(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Repository URL (optional)
+                  <input type="url" value={repositoryUrl} onChange={event => setRepositoryUrl(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                </label>
+              </div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                Description (optional)
+                <textarea value={description} onChange={event => setDescription(event.target.value)} rows={3} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+              </label>
+              {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowCreate(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button>
+                <button disabled={saving || !activeWorkspace} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? 'Creating...' : 'Create Project'}</button>
+              </div>
+            </form>
+          )}
+          {error && !showCreate && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+          {projectsLoading || workspacesLoading ? (
+            <p className="text-sm text-slate-500">Loading projects...</p>
+          ) : projects.length === 0 ? (
+            <EmptyState icon={FolderKanban} title="No projects yet" description="Create a project to start managing environments, secrets, and tasks" action={
+              <button onClick={() => setShowCreate(true)} className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">Create Project</button>
+            } />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {projects.map(project => (
+                <article key={project.id} className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+                  <h2 className="font-semibold text-slate-900 dark:text-white">{project.name}</h2>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{project.description || 'No description'}</p>
+                  {project.repository_url && <a className="mt-3 block truncate text-sm text-indigo-600 hover:underline dark:text-indigo-400" href={project.repository_url} target="_blank" rel="noreferrer">{project.repository_url}</a>}
+                  <p className="mt-3 text-xs text-slate-400">{project.status}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -147,31 +147,13 @@ export async function getPendingInvitations(workspaceId: string) {
 // ─── Projects ───────────────────────────────────────────────────────
 
 export async function createProject(workspaceId: string, name: string, description: string | null, repositoryUrl: string | null, ownerId: string) {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-  const { data: project, error } = await supabase
-    .from('projects')
-    .insert({ workspace_id: workspaceId, name, slug, description, repository_url: repositoryUrl, owner_id: ownerId })
-    .select()
-    .single();
-  if (error) throw error;
-
-  // Add owner as project member
-  await supabase.from('project_members').insert({
-    project_id: project.id,
-    user_id: ownerId,
-    role: 'owner',
+  const { data: project, error } = await supabase.rpc('create_project_with_defaults', {
+    p_workspace_id: workspaceId,
+    p_name: name,
+    p_description: description,
+    p_repository_url: repositoryUrl,
   });
-
-  // Create default environments
-  const envTypes: EnvironmentType[] = ['development', 'testing', 'staging', 'production'];
-  for (const type of envTypes) {
-    await supabase.from('environments').insert({
-      project_id: project.id,
-      name: type.charAt(0).toUpperCase() + type.slice(1),
-      type,
-    });
-  }
+  if (error) throw error;
 
   await logAuditEvent({
     actor_id: ownerId,
