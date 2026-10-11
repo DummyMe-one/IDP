@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useAuth } from '@/stores/AuthContext';
 import {
   Shield, Lock, Key, Database, GitBranch, CheckSquare, Users, Globe,
   Zap, Server, ArrowRight, Github, Star, Sparkles, Code2, Terminal,
@@ -8,16 +9,30 @@ import {
   Menu, X, ShieldCheck, LockKeyhole, KeyRound, ServerCog, Sun, Moon
 } from 'lucide-react';
 
+function scrollToSection(id: string) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
 // ─── Navbar ─────────────────────────────────────────────────────────
 function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { signInDemo } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  const handleDemo = async () => {
+    await signInDemo();
+    navigate('/dashboard');
+  };
 
   return (
     <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-800/50' : 'bg-transparent'}`}>
@@ -30,14 +45,21 @@ function Navbar() {
         </Link>
 
         <div className="hidden md:flex items-center gap-8">
-          <a href="#features" className="text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition">Features</a>
-          <a href="#security" className="text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition">Security</a>
-          <a href="#how-it-works" className="text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition">How it works</a>
-          <a href="#stack" className="text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition">Stack</a>
+          <button type="button" onClick={() => scrollToSection('features')} className="text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition">Features</button>
+          <button type="button" onClick={() => scrollToSection('security')} className="text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition">Security</button>
+          <button type="button" onClick={() => scrollToSection('how-it-works')} className="text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition">How it works</button>
+          <button type="button" onClick={() => scrollToSection('stack')} className="text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition">Stack</button>
         </div>
 
         <div className="hidden md:flex items-center gap-3">
-          <Link to="/login" className="text-sm font-medium text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition px-4 py-2">
+          <button
+            type="button"
+            onClick={handleDemo}
+            className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 px-3.5 py-2 rounded-lg transition"
+          >
+            Live Demo
+          </button>
+          <Link to="/login" className="text-sm font-medium text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition px-3.5 py-2">
             Sign in
           </Link>
           <Link to="/register" className="text-sm font-medium text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 px-4 py-2 rounded-lg transition shadow-lg shadow-indigo-500/25">
@@ -52,10 +74,11 @@ function Navbar() {
 
       {mobileOpen && (
         <div className="md:hidden bg-white dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 px-6 py-4 space-y-3">
-          <a href="#features" className="block text-sm text-slate-600 dark:text-slate-300 py-2">Features</a>
-          <a href="#security" className="block text-sm text-slate-600 dark:text-slate-300 py-2">Security</a>
-          <a href="#how-it-works" className="block text-sm text-slate-600 dark:text-slate-300 py-2">How it works</a>
+          <button type="button" onClick={() => { setMobileOpen(false); scrollToSection('features'); }} className="block w-full text-left text-sm text-slate-600 dark:text-slate-300 py-2">Features</button>
+          <button type="button" onClick={() => { setMobileOpen(false); scrollToSection('security'); }} className="block w-full text-left text-sm text-slate-600 dark:text-slate-300 py-2">Security</button>
+          <button type="button" onClick={() => { setMobileOpen(false); scrollToSection('how-it-works'); }} className="block w-full text-left text-sm text-slate-600 dark:text-slate-300 py-2">How it works</button>
           <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-col gap-2">
+            <button type="button" onClick={handleDemo} className="text-sm font-medium text-indigo-600 dark:text-indigo-400 py-2 text-left">Launch Live Demo</button>
             <Link to="/login" className="text-sm font-medium text-slate-700 dark:text-slate-300 py-2">Sign in</Link>
             <Link to="/register" className="text-sm font-medium text-white bg-indigo-600 px-4 py-2 rounded-lg text-center">Get started</Link>
           </div>
@@ -67,6 +90,14 @@ function Navbar() {
 
 // ─── Hero Section ───────────────────────────────────────────────────
 function Hero() {
+  const { signInDemo } = useAuth();
+  const navigate = useNavigate();
+
+  const handleDemo = async () => {
+    await signInDemo();
+    navigate('/dashboard');
+  };
+
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-20">
       {/* Animated background */}
@@ -124,10 +155,22 @@ function Hero() {
             Start for free
             <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
           </Link>
-          <a href="#features" className="flex items-center gap-2 px-6 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium hover:border-indigo-300 dark:hover:border-indigo-700 transition shadow-sm">
+          <button
+            type="button"
+            onClick={handleDemo}
+            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 font-medium hover:bg-indigo-50 dark:hover:bg-indigo-950/60 transition shadow-sm"
+          >
+            <Sparkles className="w-4 h-4" />
+            Launch Instant Demo
+          </button>
+          <button
+            type="button"
+            onClick={() => scrollToSection('features')}
+            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium hover:border-indigo-300 dark:hover:border-indigo-700 transition shadow-sm"
+          >
             See features
             <ChevronRight className="w-4 h-4" />
-          </a>
+          </button>
         </motion.div>
 
         <motion.div

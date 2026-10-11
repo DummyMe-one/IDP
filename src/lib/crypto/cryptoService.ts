@@ -44,7 +44,7 @@ export class CryptoService {
     return crypto.subtle.generateKey(
       { name: AES_ALGO, length: AES_KEY_LENGTH },
       true,
-      ['encrypt', 'decrypt']
+      ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']
     );
   }
 
@@ -92,10 +92,14 @@ export class CryptoService {
       exportedKey
     );
 
+    const nonceB64 = arrayBufferToBase64(nonce.buffer as ArrayBuffer);
+    const cipherB64 = arrayBufferToBase64(encrypted as ArrayBuffer);
+
     return {
-      encryptedVaultKey: arrayBufferToBase64(encrypted as ArrayBuffer),
+      // Embed nonce with ciphertext so single-column DB storage preserves the IV
+      encryptedVaultKey: `${nonceB64}.${cipherB64}`,
       salt: arrayBufferToBase64(salt.buffer as ArrayBuffer),
-      nonce: arrayBufferToBase64(nonce.buffer as ArrayBuffer),
+      nonce: nonceB64,
     };
   }
 
@@ -103,12 +107,21 @@ export class CryptoService {
     passphrase: string,
     encryptedVaultKey: string,
     salt: string,
-    nonce: string
+    nonce: string = ''
   ): Promise<CryptoKey> {
     const saltBytes = new Uint8Array(base64ToArrayBuffer(salt));
     const kek = await this.deriveKeyFromPassphrase(passphrase, saltBytes);
-    const nonceBytes = new Uint8Array(base64ToArrayBuffer(nonce));
-    const encryptedKeyBytes = base64ToArrayBuffer(encryptedVaultKey);
+
+    let resolvedNonce = nonce;
+    let resolvedCipher = encryptedVaultKey;
+    if (encryptedVaultKey.includes('.')) {
+      const [embeddedNonce, embeddedCipher] = encryptedVaultKey.split('.', 2);
+      resolvedNonce = embeddedNonce;
+      resolvedCipher = embeddedCipher;
+    }
+
+    const nonceBytes = new Uint8Array(base64ToArrayBuffer(resolvedNonce));
+    const encryptedKeyBytes = base64ToArrayBuffer(resolvedCipher);
 
     const decrypted = await crypto.subtle.decrypt(
       { name: AES_ALGO, iv: nonceBytes as unknown as BufferSource },
@@ -362,10 +375,13 @@ export class CryptoService {
       exported
     );
 
+    const nonceB64 = arrayBufferToBase64(nonce.buffer as ArrayBuffer);
+    const cipherB64 = arrayBufferToBase64(encrypted as ArrayBuffer);
+
     return {
-      encryptedVaultKey: arrayBufferToBase64(encrypted as ArrayBuffer),
+      encryptedVaultKey: `${nonceB64}.${cipherB64}`,
       salt: arrayBufferToBase64(salt.buffer as ArrayBuffer),
-      nonce: arrayBufferToBase64(nonce.buffer as ArrayBuffer),
+      nonce: nonceB64,
     };
   }
 }
