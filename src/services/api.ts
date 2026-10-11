@@ -118,28 +118,61 @@ export async function getWorkspaces(
 
   if (isSupabaseConfigured) {
     try {
-      const { data, error } = await supabase
-        .from('workspace_members')
-        .select(`
-          workspace:workspaces(*),
-          role
-        `)
-        .eq('user_id', userId);
+      const [{ data: memberData }, { data: ownedData }] = await Promise.all([
+        supabase
+          .from('workspace_members')
+          .select(`
+            workspace:workspaces(*),
+            role
+          `)
+          .eq('user_id', userId),
+        supabase
+          .from('workspaces')
+          .select('*')
+          .eq('owner_id', userId)
+          .eq('is_archived', false),
+      ]);
 
-      if (!error && data && data.length > 0) {
-        const remoteWorkspaces = data
-          .filter(d => d.workspace)
-          .map(d => ({
-            ...(d.workspace as unknown as Workspace),
-            member_role: d.role as UserRole,
-          }))
-          .filter(w => !w.is_archived);
+      const remoteMap = new Map<string, Workspace & { member_role: UserRole }>();
 
-        // Merge remote into localDb so offline/hybrid stays synced
+      if (memberData) {
+        for (const d of memberData) {
+          if (d.workspace) {
+            const ws = d.workspace as unknown as Workspace;
+            if (!ws.is_archived) {
+              remoteMap.set(ws.id, { ...ws, member_role: d.role as UserRole });
+            }
+          }
+        }
+      }
+
+      if (ownedData) {
+        for (const ow of ownedData as Workspace[]) {
+          if (!remoteMap.has(ow.id)) {
+            remoteMap.set(ow.id, { ...ow, member_role: 'owner' });
+            // Backfill missing workspace_members row if needed
+            await supabase
+              .from('workspace_members')
+              .upsert(
+                { workspace_id: ow.id, user_id: userId, role: 'owner' },
+                { onConflict: 'workspace_id,user_id' }
+              );
+          }
+        }
+      }
+
+      const remoteWorkspaces = Array.from(remoteMap.values());
+
+      if (remoteWorkspaces.length > 0) {
         for (const rw of remoteWorkspaces) {
-          if (!db.workspaces.some(w => w.id === rw.id)) {
-            const { member_role, ...wsOnly } = rw;
+          const { member_role, ...wsOnly } = rw;
+          const existingIdx = db.workspaces.findIndex(w => w.id === rw.id);
+          if (existingIdx >= 0) {
+            db.workspaces[existingIdx] = wsOnly;
+          } else {
             db.workspaces.push(wsOnly);
+          }
+          if (!db.workspace_members.some(wm => wm.workspace_id === rw.id && wm.user_id === userId)) {
             db.workspace_members.push({
               id: crypto.randomUUID(),
               workspace_id: rw.id,
@@ -150,11 +183,35 @@ export async function getWorkspaces(
           }
         }
         saveLocalDb(db);
-        const mergedIds = new Set(remoteWorkspaces.map(w => w.id));
-        return [
-          ...remoteWorkspaces,
-          ...localResult.filter(lw => !mergedIds.has(lw.id)),
-        ];
+        return remoteWorkspaces;
+      } else if (localResult.length > 0) {
+        // User has no workspaces in Supabase yet — sync their primary local workspace to Supabase
+        const primary = localResult[0];
+        const { data: syncedWs, error: syncErr } = await supabase
+          .from('workspaces')
+          .upsert(
+            {
+              id: primary.id,
+              name: primary.name,
+              slug: primary.slug,
+              description: primary.description,
+              owner_id: userId,
+              is_archived: false,
+            },
+            { onConflict: 'id' }
+          )
+          .select()
+          .single();
+
+        if (!syncErr && syncedWs) {
+          await supabase
+            .from('workspace_members')
+            .upsert(
+              { workspace_id: syncedWs.id, user_id: userId, role: 'owner' },
+              { onConflict: 'workspace_id,user_id' }
+            );
+          return [{ ...(syncedWs as Workspace), member_role: 'owner' }];
+        }
       }
     } catch {
       // Return local user-scoped workspaces
@@ -500,6 +557,30 @@ export async function createProject(
 
   if (isSupabaseConfigured) {
     try {
+      // Ensure the workspace and owner membership row exist in Supabase first (prevents 42501 RLS violation on projects)
+      const localWs = db.workspaces.find(w => w.id === workspaceId);
+      if (localWs) {
+        await supabase.from('workspaces').upsert(
+          {
+            id: localWs.id,
+            name: localWs.name,
+            slug: localWs.slug,
+            description: localWs.description,
+            owner_id: ownerId,
+            is_archived: false,
+          },
+          { onConflict: 'id' }
+        );
+      }
+      await supabase.from('workspace_members').upsert(
+        {
+          workspace_id: workspaceId,
+          user_id: ownerId,
+          role: 'owner',
+        },
+        { onConflict: 'workspace_id,user_id' }
+      );
+
       const { data: rpcProject, error: rpcError } = await supabase.rpc('create_project_with_defaults', {
         p_workspace_id: workspaceId,
         p_name: name.trim(),
@@ -510,7 +591,7 @@ export async function createProject(
       if (!rpcError && rpcProject) {
         createdProject = rpcProject as Project;
       } else {
-        // Fallback to direct table insert if RPC migration 004 was not applied
+        // Fallback to direct table insert if RPC migration was not applied
         const { data: directProject, error: directError } = await supabase
           .from('projects')
           .insert({
@@ -526,17 +607,23 @@ export async function createProject(
 
         if (!directError && directProject) {
           createdProject = directProject as Project;
-          await supabase.from('project_members').insert({
-            project_id: createdProject.id,
-            user_id: ownerId,
-            role: 'owner',
-          });
-          await supabase.from('environments').insert([
-            { project_id: createdProject.id, name: 'Development', type: 'development' },
-            { project_id: createdProject.id, name: 'Testing', type: 'testing' },
-            { project_id: createdProject.id, name: 'Staging', type: 'staging' },
-            { project_id: createdProject.id, name: 'Production', type: 'production' },
-          ]);
+          await supabase.from('project_members').upsert(
+            {
+              project_id: createdProject.id,
+              user_id: ownerId,
+              role: 'owner',
+            },
+            { onConflict: 'project_id,user_id' }
+          );
+          await supabase.from('environments').upsert(
+            [
+              { project_id: createdProject.id, name: 'Development', type: 'development' },
+              { project_id: createdProject.id, name: 'Testing', type: 'testing' },
+              { project_id: createdProject.id, name: 'Staging', type: 'staging' },
+              { project_id: createdProject.id, name: 'Production', type: 'production' },
+            ],
+            { onConflict: 'project_id,name' }
+          );
         }
       }
     } catch {
