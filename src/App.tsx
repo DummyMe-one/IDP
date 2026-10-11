@@ -845,6 +845,15 @@ function AppLayout({ children }: { children: ReactNode }) {
                     </option>
                   ))}
                 </select>
+                {activeProject && (
+                  <Link
+                    to={`/projects?edit=${activeProject.id}`}
+                    title={`Edit Project (${activeProject.name})`}
+                    className="p-0.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950 text-indigo-600 dark:text-indigo-400"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </Link>
+                )}
                 <Link
                   to="/projects?new=1"
                   title="Create New Project"
@@ -1696,13 +1705,8 @@ function ProjectsPage() {
   const [editError, setEditError] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
-  useEffect(() => {
-    if (location.search.includes('new=1')) {
-      setShowCreate(true);
-    }
-  }, [location.search]);
-
   const openEditProject = (project: Project) => {
+    setShowCreate(false);
     setEditingProject(project);
     setEditName(project.name);
     setEditSlug(project.slug);
@@ -1712,6 +1716,20 @@ function ProjectsPage() {
     setEditWorkspaceId(project.workspace_id);
     setEditError('');
   };
+
+  useEffect(() => {
+    if (location.search.includes('new=1')) {
+      setShowCreate(true);
+      setEditingProject(null);
+    } else if (location.search.includes('edit=')) {
+      const params = new URLSearchParams(location.search);
+      const editId = params.get('edit');
+      const target = projects.find(p => p.id === editId) || activeProject;
+      if (target) {
+        openEditProject(target);
+      }
+    }
+  }, [location.search, projects, activeProject]);
 
   const handleSaveEditProject = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1825,17 +1843,28 @@ function ProjectsPage() {
               : 'Select a workspace to manage projects'}
           </p>
         </div>
-        <button
-          onClick={() => {
-            setShowCreate(true);
-            setEditingProject(null);
-            setError('');
-          }}
-          disabled={!activeWorkspace}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition disabled:opacity-50 shadow-lg shadow-indigo-500/20"
-        >
-          <Plus className="w-4 h-4" /> New Project
-        </button>
+        <div className="flex items-center gap-2.5">
+          {activeProject && (
+            <button
+              type="button"
+              onClick={() => openEditProject(activeProject)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-sm font-medium transition"
+            >
+              <Edit3 className="w-4 h-4" /> Edit "{activeProject.name}"
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setShowCreate(true);
+              setEditingProject(null);
+              setError('');
+            }}
+            disabled={!activeWorkspace}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition disabled:opacity-50 shadow-lg shadow-indigo-500/20"
+          >
+            <Plus className="w-4 h-4" /> New Project
+          </button>
+        </div>
       </div>
 
       {!workspacesLoading && workspaces.length === 0 ? (
