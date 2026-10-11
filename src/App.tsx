@@ -36,6 +36,7 @@ import {
   getAuditEvents,
 } from '@/services/api';
 import type {
+  Project,
   Environment,
   EncryptedSecret,
   Branch,
@@ -844,6 +845,15 @@ function AppLayout({ children }: { children: ReactNode }) {
                     </option>
                   ))}
                 </select>
+                {activeProject && (
+                  <Link
+                    to={`/projects?edit=${activeProject.id}`}
+                    title={`Edit Project (${activeProject.name})`}
+                    className="p-0.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950 text-indigo-600 dark:text-indigo-400"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </Link>
+                )}
                 <Link
                   to="/projects?new=1"
                   title="Create New Project"
@@ -1429,11 +1439,11 @@ function WorkspacesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Workspaces</h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-            Organize your teams and switch between isolated engineering workspaces
+            Top-level organization, client, or department containers that group your projects, team RBAC, and audit logs
           </p>
         </div>
         <button
@@ -1442,6 +1452,31 @@ function WorkspacesPage() {
         >
           <Plus className="w-4 h-4" /> New Workspace
         </button>
+      </div>
+
+      {/* Hierarchy Explainer Banner */}
+      <div className="rounded-2xl border border-indigo-200/70 dark:border-indigo-900/60 bg-indigo-50/60 dark:bg-indigo-950/30 p-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+              <Layers className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                Why do we create Workspaces vs. Projects?
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                A <strong>Workspace</strong> represents a <strong>Company, Client, or Engineering Team</strong> (e.g., <em>Shivam Electronics</em>) where team members and permissions live. Inside a Workspace, you create multiple <strong>Projects</strong>—one for each GitHub repository, app, or microservice (e.g., <em>Landing Website</em>, <em>Admin API</em>, <em>Mobile App</em>), each with its own 4 environments and encrypted secrets.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/projects"
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 text-xs font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50"
+          >
+            View Workspace Projects <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
       </div>
 
       {showCreate && (
@@ -1457,7 +1492,7 @@ function WorkspacesPage() {
                 required
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="e.g., Platform Engineering"
+                placeholder="e.g., Shivam Electronics or Platform Engineering"
                 className="w-full px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -1466,7 +1501,7 @@ function WorkspacesPage() {
               <input
                 value={description}
                 onChange={e => setDescription(e.target.value)}
-                placeholder="Core backend services and infrastructure"
+                placeholder="Core backend services, client apps, and infrastructure"
                 className="w-full px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -1530,29 +1565,35 @@ function WorkspacesPage() {
 
                 {isEditing ? (
                   <div className="mt-3 space-y-2" onClick={e => e.stopPropagation()}>
-                    <input
-                      value={editName}
-                      onChange={e => setEditName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-sm rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                    <input
-                      value={editDesc}
-                      onChange={e => setEditDesc(e.target.value)}
-                      placeholder="Description"
-                      className="w-full px-2.5 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">
+                      Workspace Name
+                      <input
+                        value={editName}
+                        onChange={e => setEditName(e.target.value)}
+                        className="mt-1 w-full px-2.5 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      />
+                    </label>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">
+                      Description
+                      <input
+                        value={editDesc}
+                        onChange={e => setEditDesc(e.target.value)}
+                        placeholder="Description"
+                        className="mt-1 w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      />
+                    </label>
                     <div className="flex gap-2 pt-1">
                       <button
                         type="button"
                         onClick={() => handleSaveEdit(ws.id)}
-                        className="px-3 py-1 rounded bg-indigo-600 text-white text-xs font-medium"
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium"
                       >
-                        Save
+                        Save Changes
                       </button>
                       <button
                         type="button"
                         onClick={() => setEditingId(null)}
-                        className="px-3 py-1 rounded border border-slate-300 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300"
+                        className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300"
                       >
                         Cancel
                       </button>
@@ -1569,7 +1610,7 @@ function WorkspacesPage() {
                       <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
                         {isSelected ? 'Currently Selected' : 'Click to Activate →'}
                       </span>
-                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                         <button
                           type="button"
                           onClick={() => {
@@ -1577,10 +1618,10 @@ function WorkspacesPage() {
                             setEditName(ws.name);
                             setEditDesc(ws.description || '');
                           }}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600"
-                          title="Edit workspace"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300"
+                          title="Edit workspace name and description"
                         >
-                          <Edit3 className="w-3.5 h-3.5" />
+                          <Edit3 className="w-3.5 h-3.5" /> Edit
                         </button>
                         {workspaces.length > 1 && (
                           <button
@@ -1605,7 +1646,29 @@ function WorkspacesPage() {
   );
 }
 
-// ─── Projects Page (Full Lifecycle & Active Context Selection) ─────
+// Helper to normalize deep GitHub/GitLab file URLs (e.g., /blob/main/... or /tree/main/...) to the repository root
+function extractRepositoryRootUrl(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname.includes('github.com') || parsed.hostname.includes('gitlab.com')) {
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      if (segments.length >= 2) {
+        const rootPath = `/${segments[0]}/${segments[1].replace(/\.git$/, '')}`;
+        const candidate = `${parsed.origin}${rootPath}`;
+        if (candidate !== trimmed.replace(/\/$/, '')) {
+          return candidate;
+        }
+      }
+    }
+  } catch {
+    // Ignore invalid URL
+  }
+  return null;
+}
+
+// ─── Projects Page (Full Lifecycle, Edit Modal & Active Context Selection) ─────
 function ProjectsPage() {
   const { user } = useAuth();
   const {
@@ -1631,11 +1694,86 @@ function ProjectsPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Edit Project state
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editSlug, setEditSlug] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editRepositoryUrl, setEditRepositoryUrl] = useState('');
+  const [editStatus, setEditStatus] = useState<'active' | 'paused' | 'archived'>('active');
+  const [editWorkspaceId, setEditWorkspaceId] = useState('');
+  const [editError, setEditError] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditProject = (project: Project) => {
+    setShowCreate(false);
+    setEditingProject(project);
+    setEditName(project.name);
+    setEditSlug(project.slug);
+    setEditDescription(project.description || '');
+    setEditRepositoryUrl(project.repository_url || '');
+    setEditStatus(project.status);
+    setEditWorkspaceId(project.workspace_id);
+    setEditError('');
+  };
+
   useEffect(() => {
     if (location.search.includes('new=1')) {
       setShowCreate(true);
+      setEditingProject(null);
+    } else if (location.search.includes('edit=')) {
+      const params = new URLSearchParams(location.search);
+      const editId = params.get('edit');
+      const target = projects.find(p => p.id === editId) || activeProject;
+      if (target) {
+        openEditProject(target);
+      }
     }
-  }, [location.search]);
+  }, [location.search, projects, activeProject]);
+
+  const handleSaveEditProject = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingProject || !editName.trim()) return;
+
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const normalizedSlug =
+        editSlug
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '') ||
+        editName
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '');
+
+      const updated = await updateProject(
+        editingProject.id,
+        {
+          name: editName.trim(),
+          slug: normalizedSlug,
+          description: editDescription.trim() || null,
+          repository_url: editRepositoryUrl.trim() || null,
+          status: editStatus,
+          workspace_id: editWorkspaceId || editingProject.workspace_id,
+        },
+        user?.id
+      );
+
+      await refreshProjects(updated.id);
+      if (activeProject?.id === updated.id) {
+        setActiveProject(updated);
+      }
+      setEditingProject(null);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update project.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1666,7 +1804,7 @@ function ProjectsPage() {
 
   const handleToggleStatus = async (projectId: string, currentStatus: 'active' | 'paused' | 'archived') => {
     const nextStatus = currentStatus === 'active' ? 'paused' : 'active';
-    await updateProject(projectId, { status: nextStatus });
+    await updateProject(projectId, { status: nextStatus }, user?.id);
     await refreshProjects();
   };
 
@@ -1691,6 +1829,9 @@ function ProjectsPage() {
     return matchesStatus && matchesSearch;
   });
 
+  const createSuggestedRepoRoot = extractRepositoryRootUrl(repositoryUrl);
+  const editSuggestedRepoRoot = extractRepositoryRootUrl(editRepositoryUrl);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1702,16 +1843,28 @@ function ProjectsPage() {
               : 'Select a workspace to manage projects'}
           </p>
         </div>
-        <button
-          onClick={() => {
-            setShowCreate(true);
-            setError('');
-          }}
-          disabled={!activeWorkspace}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition disabled:opacity-50 shadow-lg shadow-indigo-500/20"
-        >
-          <Plus className="w-4 h-4" /> New Project
-        </button>
+        <div className="flex items-center gap-2.5">
+          {activeProject && (
+            <button
+              type="button"
+              onClick={() => openEditProject(activeProject)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-sm font-medium transition"
+            >
+              <Edit3 className="w-4 h-4" /> Edit "{activeProject.name}"
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setShowCreate(true);
+              setEditingProject(null);
+              setError('');
+            }}
+            disabled={!activeWorkspace}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition disabled:opacity-50 shadow-lg shadow-indigo-500/20"
+          >
+            <Plus className="w-4 h-4" /> New Project
+          </button>
+        </div>
       </div>
 
       {!workspacesLoading && workspaces.length === 0 ? (
@@ -1734,6 +1887,163 @@ function ProjectsPage() {
             <p role="alert" className="text-sm text-red-600 dark:text-red-400">
               {workspacesError}
             </p>
+          )}
+
+          {/* Edit Project Modal / Panel */}
+          {editingProject && (
+            <form
+              onSubmit={handleSaveEditProject}
+              className="space-y-4 rounded-2xl border-2 border-indigo-500 bg-white dark:bg-slate-900 p-6 shadow-xl"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+                    <Edit3 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-slate-900 dark:text-white text-lg">
+                      Edit Project: {editingProject.name}
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Update project name, slug, GitHub repository URL, description, status, or workspace
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingProject(null)}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Project Name *
+                  <input
+                    required
+                    value={editName}
+                    onChange={event => {
+                      setEditName(event.target.value);
+                      setEditSlug(
+                        event.target.value
+                          .trim()
+                          .toLowerCase()
+                          .replace(/[^a-z0-9]+/g, '-')
+                          .replace(/^-|-$/g, '')
+                      );
+                    }}
+                    placeholder="e.g., Shivam Landing Frontend"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </label>
+
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Project Slug (URL identifier)
+                  <input
+                    value={editSlug}
+                    onChange={event => setEditSlug(event.target.value)}
+                    placeholder="e.g., shivam-landing-frontend"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                    GitHub / GitLab Repository URL
+                    <input
+                      type="url"
+                      value={editRepositoryUrl}
+                      onChange={event => setEditRepositoryUrl(event.target.value)}
+                      placeholder="https://github.com/owner/repository"
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  {editSuggestedRepoRoot && (
+                    <div className="mt-1.5 flex items-center justify-between gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-3 py-1.5 text-xs text-amber-800 dark:text-amber-300">
+                      <span>
+                        Detected file/branch path in URL. Repository root is{' '}
+                        <code className="font-mono font-semibold">{editSuggestedRepoRoot}</code>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditRepositoryUrl(editSuggestedRepoRoot)}
+                        className="shrink-0 px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-medium"
+                      >
+                        Use Repo Root
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                    Status
+                    <select
+                      value={editStatus}
+                      onChange={e => setEditStatus(e.target.value as 'active' | 'paused' | 'archived')}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="active">Active</option>
+                      <option value="paused">Paused</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                    Workspace
+                    <select
+                      value={editWorkspaceId}
+                      onChange={e => setEditWorkspaceId(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {workspaces.map(ws => (
+                        <option key={ws.id} value={ws.id}>
+                          {ws.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                Description
+                <textarea
+                  value={editDescription}
+                  onChange={event => setEditDescription(event.target.value)}
+                  rows={2}
+                  placeholder="Describe the service architecture, tech stack, or deployment target..."
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </label>
+
+              {editError && (
+                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                  {editError}
+                </p>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingProject(null)}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="rounded-lg bg-indigo-600 hover:bg-indigo-700 px-5 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {editSaving ? 'Saving Changes...' : 'Save Project Changes'}
+                </button>
+              </div>
+            </form>
           )}
 
           {showCreate && (
@@ -1767,16 +2077,32 @@ function ProjectsPage() {
                     className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </label>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Repository URL (optional)
-                  <input
-                    type="url"
-                    value={repositoryUrl}
-                    onChange={event => setRepositoryUrl(event.target.value)}
-                    placeholder="https://github.com/org/repo"
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </label>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                    Repository URL (optional)
+                    <input
+                      type="url"
+                      value={repositoryUrl}
+                      onChange={event => setRepositoryUrl(event.target.value)}
+                      placeholder="https://github.com/org/repo"
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  {createSuggestedRepoRoot && (
+                    <div className="mt-1.5 flex items-center justify-between gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-3 py-1.5 text-xs text-amber-800 dark:text-amber-300">
+                      <span>
+                        Trim deep path to repo root <code className="font-mono">{createSuggestedRepoRoot}</code>?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setRepositoryUrl(createSuggestedRepoRoot)}
+                        className="shrink-0 px-2 py-0.5 rounded bg-amber-600 text-white font-medium"
+                      >
+                        Trim URL
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                 Description (optional)
@@ -1906,17 +2232,37 @@ function ProjectsPage() {
                         {project.description || 'No description provided.'}
                       </p>
 
-                      {project.repository_url && (
-                        <a
-                          onClick={e => e.stopPropagation()}
-                          className="mt-3 inline-flex items-center gap-1 max-w-full truncate text-xs text-indigo-600 hover:underline dark:text-indigo-400"
-                          href={project.repository_url}
-                          target="_blank"
-                          rel="noreferrer"
+                      {project.repository_url ? (
+                        <div className="mt-3 flex items-center justify-between gap-2" onClick={e => e.stopPropagation()}>
+                          <a
+                            className="inline-flex items-center gap-1 max-w-full truncate text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+                            href={project.repository_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <ExternalLink className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{project.repository_url}</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => openEditProject(project)}
+                            className="shrink-0 text-[11px] text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 underline"
+                            title="Edit repository URL"
+                          >
+                            Change URL
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            openEditProject(project);
+                          }}
+                          className="mt-3 inline-flex items-center gap-1 text-xs text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
                         >
-                          <ExternalLink className="w-3 h-3 shrink-0" />
-                          <span className="truncate">{project.repository_url}</span>
-                        </a>
+                          <GitBranch className="w-3 h-3" /> + Link GitHub Repository URL
+                        </button>
                       )}
                     </div>
 
@@ -1924,7 +2270,7 @@ function ProjectsPage() {
                       className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2"
                       onClick={e => e.stopPropagation()}
                     >
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => {
@@ -1958,6 +2304,14 @@ function ProjectsPage() {
                       </div>
 
                       <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditProject(project)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-indigo-950 text-slate-700 dark:text-slate-200 hover:text-indigo-600 text-xs font-medium"
+                          title="Edit project name, GitHub repository URL, description, and status"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> Edit
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleToggleStatus(project.id, project.status)}
