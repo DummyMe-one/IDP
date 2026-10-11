@@ -15,7 +15,7 @@ const ROOT = process.cwd();
 let issues = 0;
 
 function check(name, condition, message) {
-  if (!condition) {
+  if (condition) {
     console.log(`  ✅ ${name}`);
   } else {
     console.log(`  ❌ ${name}: ${message}`);

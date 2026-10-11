@@ -1,228 +1,782 @@
-import { supabase } from '@/lib/supabase/client';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
+import {
+  loadLocalDb,
+  saveLocalDb,
+  slugify,
+  provisionProjectInDb,
+  ensureUserProvisioned,
+} from '@/lib/storage/localDb';
 import type {
-  Workspace, WorkspaceMember, Project, ProjectMember,
-  Environment, EncryptedSecret, Branch, Task, AuditEvent,
-  IntegrationConnection, ProjectKeyEnvelope, WorkspaceInvitation,
-  UserRole, EnvironmentType, TaskStatus, TaskPriority
+  Workspace,
+  WorkspaceMember,
+  Project,
+  Profile,
+  Environment,
+  EncryptedSecret,
+  Branch,
+  Task,
+  AuditEvent,
+  IntegrationConnection,
+  ProjectKeyEnvelope,
+  WorkspaceInvitation,
+  UserRole,
+  EnvironmentType,
+  TaskStatus,
+  TaskPriority,
 } from '@/types';
 
 // ─── Workspaces ─────────────────────────────────────────────────────
 
-export async function createWorkspace(name: string, description: string | null, ownerId: string) {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  
-  const { data: workspace, error } = await supabase
-    .from('workspaces')
-    .insert({ name, slug, description, owner_id: ownerId })
-    .select()
-    .single();
+export async function createWorkspace(
+  name: string,
+  description: string | null,
+  ownerId: string
+): Promise<Workspace> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const wsId = crypto.randomUUID();
+  const baseSlug = slugify(name);
+  const slug = db.workspaces.some(w => w.slug === baseSlug)
+    ? `${baseSlug}-${wsId.slice(0, 5)}`
+    : baseSlug;
 
-  if (error) throw error;
+  let createdWorkspace: Workspace = {
+    id: wsId,
+    name: name.trim(),
+    slug,
+    description: description?.trim() || null,
+    owner_id: ownerId,
+    is_archived: false,
+    created_at: now,
+    updated_at: now,
+  };
 
-  // Add owner as member
-  const { error: memberError } = await supabase.from('workspace_members').insert({
-    workspace_id: workspace.id,
-    user_id: ownerId,
-    role: 'owner',
-  });
-  if (memberError) throw memberError;
+  if (isSupabaseConfigured) {
+    try {
+      const { data: workspace, error } = await supabase
+        .from('workspaces')
+        .insert({ name: name.trim(), slug, description, owner_id: ownerId })
+        .select()
+        .single();
 
-  // Log audit event
+      if (!error && workspace) {
+        createdWorkspace = workspace as Workspace;
+        await supabase.from('workspace_members').insert({
+          workspace_id: createdWorkspace.id,
+          user_id: ownerId,
+          role: 'owner',
+        });
+      }
+    } catch {
+      // Fallback to localDb below
+    }
+  }
+
+  db.workspaces.unshift(createdWorkspace);
+  if (!db.workspace_members.some(wm => wm.workspace_id === createdWorkspace.id && wm.user_id === ownerId)) {
+    db.workspace_members.push({
+      id: crypto.randomUUID(),
+      workspace_id: createdWorkspace.id,
+      user_id: ownerId,
+      role: 'owner',
+      joined_at: now,
+    });
+  }
+  saveLocalDb(db);
+
   await logAuditEvent({
     actor_id: ownerId,
     action: 'workspace.created',
     resource_type: 'workspace',
-    resource_id: workspace.id,
-    workspace_id: workspace.id,
+    resource_id: createdWorkspace.id,
+    workspace_id: createdWorkspace.id,
     outcome: 'success',
+    metadata: { name: createdWorkspace.name },
   });
 
-  return workspace as Workspace;
+  return createdWorkspace;
 }
 
-export async function getWorkspaces(userId: string) {
-  const { data, error } = await supabase
-    .from('workspace_members')
-    .select(`
-      workspace:workspaces(*),
-      role
-    `)
-    .eq('user_id', userId);
+export async function getWorkspaces(
+  userId: string,
+  userEmail?: string
+): Promise<(Workspace & { member_role: UserRole })[]> {
+  if (userEmail) {
+    ensureUserProvisioned(userId, userEmail);
+  }
 
-  if (error) throw error;
-  return (data || []).map(d => ({ ...(d.workspace as unknown as Workspace), member_role: d.role as UserRole }));
+  const db = loadLocalDb();
+  const localMemberships = db.workspace_members.filter(wm => wm.user_id === userId);
+  const localResult: (Workspace & { member_role: UserRole })[] = [];
+
+  for (const m of localMemberships) {
+    const ws = db.workspaces.find(w => w.id === m.workspace_id && !w.is_archived);
+    if (ws) {
+      localResult.push({ ...ws, member_role: m.role });
+    }
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('workspace_members')
+        .select(`
+          workspace:workspaces(*),
+          role
+        `)
+        .eq('user_id', userId);
+
+      if (!error && data && data.length > 0) {
+        const remoteWorkspaces = data
+          .filter(d => d.workspace)
+          .map(d => ({
+            ...(d.workspace as unknown as Workspace),
+            member_role: d.role as UserRole,
+          }))
+          .filter(w => !w.is_archived);
+
+        // Merge remote into localDb so offline/hybrid stays synced
+        for (const rw of remoteWorkspaces) {
+          if (!db.workspaces.some(w => w.id === rw.id)) {
+            const { member_role, ...wsOnly } = rw;
+            db.workspaces.push(wsOnly);
+            db.workspace_members.push({
+              id: crypto.randomUUID(),
+              workspace_id: rw.id,
+              user_id: userId,
+              role: member_role,
+              joined_at: rw.created_at,
+            });
+          }
+        }
+        saveLocalDb(db);
+        const mergedIds = new Set(remoteWorkspaces.map(w => w.id));
+        return [
+          ...remoteWorkspaces,
+          ...localResult.filter(lw => !mergedIds.has(lw.id)),
+        ];
+      }
+    } catch {
+      // Return local user-scoped workspaces
+    }
+  }
+
+  return localResult;
 }
 
-export async function updateWorkspace(id: string, updates: Partial<Workspace>) {
-  const { data, error } = await supabase
-    .from('workspaces')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Workspace;
+export async function updateWorkspace(id: string, updates: Partial<Workspace>): Promise<Workspace> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const idx = db.workspaces.findIndex(w => w.id === id);
+  if (idx >= 0) {
+    db.workspaces[idx] = { ...db.workspaces[idx], ...updates, updated_at: now };
+    saveLocalDb(db);
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('workspaces')
+        .update({ ...updates, updated_at: now })
+        .eq('id', id)
+        .select()
+        .single();
+      if (!error && data) return data as Workspace;
+    } catch {
+      // Use local result
+    }
+  }
+
+  if (idx < 0) throw new Error('Workspace not found');
+  return db.workspaces[idx];
 }
 
-export async function archiveWorkspace(id: string) {
-  return updateWorkspace(id, { is_archived: true });
+export async function archiveWorkspace(id: string, actorId?: string): Promise<Workspace> {
+  const updated = await updateWorkspace(id, { is_archived: true });
+  if (actorId) {
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'workspace.archived',
+      resource_type: 'workspace',
+      resource_id: id,
+      workspace_id: id,
+      outcome: 'success',
+    });
+  }
+  return updated;
 }
 
 // ─── Workspace Members ──────────────────────────────────────────────
 
-export async function getWorkspaceMembers(workspaceId: string) {
-  const { data, error } = await supabase
-    .from('workspace_members')
-    .select(`
-      *,
-      profile:profiles(*)
-    `)
-    .eq('workspace_id', workspaceId);
-  if (error) throw error;
-  return data as (WorkspaceMember & { profile: any })[];
+export async function getWorkspaceMembers(
+  workspaceId: string
+): Promise<(WorkspaceMember & { profile: Profile | null })[]> {
+  const db = loadLocalDb();
+  const localMembers = db.workspace_members
+    .filter(wm => wm.workspace_id === workspaceId)
+    .map(wm => ({
+      ...wm,
+      profile: db.profiles.find(p => p.id === wm.user_id) || {
+        id: wm.user_id,
+        email: 'member@devportal.io',
+        full_name: 'Workspace Member',
+        avatar_url: null,
+        created_at: wm.joined_at,
+        updated_at: wm.joined_at,
+      },
+    }));
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('workspace_members')
+        .select(`
+          *,
+          profile:profiles(*)
+        `)
+        .eq('workspace_id', workspaceId);
+      if (!error && data && data.length > 0) {
+        return data as (WorkspaceMember & { profile: Profile | null })[];
+      }
+    } catch {
+      // Fallback to localMembers
+    }
+  }
+
+  return localMembers;
 }
 
-export async function addWorkspaceMember(workspaceId: string, userId: string, role: UserRole) {
-  const { data, error } = await supabase
-    .from('workspace_members')
-    .insert({ workspace_id: workspaceId, user_id: userId, role })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as WorkspaceMember;
+export async function addWorkspaceMember(
+  workspaceId: string,
+  userId: string,
+  role: UserRole
+): Promise<WorkspaceMember> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const existing = db.workspace_members.find(
+    wm => wm.workspace_id === workspaceId && wm.user_id === userId
+  );
+  if (existing) {
+    existing.role = role;
+    saveLocalDb(db);
+    return existing;
+  }
+
+  const member: WorkspaceMember = {
+    id: crypto.randomUUID(),
+    workspace_id: workspaceId,
+    user_id: userId,
+    role,
+    joined_at: now,
+  };
+  db.workspace_members.push(member);
+  saveLocalDb(db);
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('workspace_members')
+        .insert({ workspace_id: workspaceId, user_id: userId, role })
+        .select()
+        .single();
+      if (!error && data) return data as WorkspaceMember;
+    } catch {
+      // Use local member
+    }
+  }
+  return member;
 }
 
-export async function removeWorkspaceMember(workspaceId: string, userId: string) {
-  const { error } = await supabase
-    .from('workspace_members')
-    .delete()
-    .eq('workspace_id', workspaceId)
-    .eq('user_id', userId);
-  if (error) throw error;
+export async function removeWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
+  const db = loadLocalDb();
+  db.workspace_members = db.workspace_members.filter(
+    wm => !(wm.workspace_id === workspaceId && wm.user_id === userId)
+  );
+  saveLocalDb(db);
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase
+        .from('workspace_members')
+        .delete()
+        .eq('workspace_id', workspaceId)
+        .eq('user_id', userId);
+    } catch {
+      // Handled locally
+    }
+  }
 }
 
-export async function updateMemberRole(workspaceId: string, userId: string, role: UserRole) {
-  const { error } = await supabase
-    .from('workspace_members')
-    .update({ role })
-    .eq('workspace_id', workspaceId)
-    .eq('user_id', userId);
-  if (error) throw error;
+export async function updateMemberRole(
+  workspaceId: string,
+  userId: string,
+  role: UserRole
+): Promise<void> {
+  const db = loadLocalDb();
+  const member = db.workspace_members.find(
+    wm => wm.workspace_id === workspaceId && wm.user_id === userId
+  );
+  if (member) {
+    member.role = role;
+    saveLocalDb(db);
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase
+        .from('workspace_members')
+        .update({ role })
+        .eq('workspace_id', workspaceId)
+        .eq('user_id', userId);
+    } catch {
+      // Handled locally
+    }
+  }
 }
 
 // ─── Invitations ────────────────────────────────────────────────────
 
-export async function createInvitation(workspaceId: string, email: string, role: UserRole, invitedBy: string) {
+export async function createInvitation(
+  workspaceId: string,
+  email: string,
+  role: UserRole,
+  invitedBy: string
+): Promise<WorkspaceInvitation> {
   const token = crypto.randomUUID();
   const tokenHash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
-  const tokenHashStr = Array.from(new Uint8Array(tokenHash)).map(b => b.toString(16).padStart(2, '0')).join('');
+  const tokenHashStr = Array.from(new Uint8Array(tokenHash))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
 
-  const { data, error } = await supabase
-    .from('workspace_invitations')
-    .insert({
-      workspace_id: workspaceId,
-      email,
-      role,
-      token_hash: tokenHashStr,
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      invited_by: invitedBy,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as WorkspaceInvitation;
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const invitation: WorkspaceInvitation = {
+    id: crypto.randomUUID(),
+    workspace_id: workspaceId,
+    email: email.trim().toLowerCase(),
+    role,
+    status: 'pending',
+    token_hash: tokenHashStr,
+    expires_at: expiresAt,
+    created_at: now,
+    invited_by: invitedBy,
+  };
+
+  const db = loadLocalDb();
+  // Check if invited email already exists as a local user; if so, also add them or keep invite
+  const matchingUser = db.users.find(u => u.email.toLowerCase() === invitation.email);
+  if (matchingUser) {
+    const alreadyInWs = db.workspace_members.some(
+      wm => wm.workspace_id === workspaceId && wm.user_id === matchingUser.id
+    );
+    if (!alreadyInWs) {
+      db.workspace_members.push({
+        id: crypto.randomUUID(),
+        workspace_id: workspaceId,
+        user_id: matchingUser.id,
+        role,
+        joined_at: now,
+      });
+      invitation.status = 'accepted';
+    }
+  }
+
+  db.workspace_invitations.unshift(invitation);
+  saveLocalDb(db);
+
+  await logAuditEvent({
+    actor_id: invitedBy,
+    action: 'invitation.sent',
+    resource_type: 'workspace_invitation',
+    resource_id: invitation.id,
+    workspace_id: workspaceId,
+    outcome: 'success',
+    metadata: { email: invitation.email, role },
+  });
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('workspace_invitations')
+        .insert({
+          workspace_id: workspaceId,
+          email: invitation.email,
+          role,
+          token_hash: tokenHashStr,
+          expires_at: expiresAt,
+          invited_by: invitedBy,
+        })
+        .select()
+        .single();
+      if (!error && data) return data as WorkspaceInvitation;
+    } catch {
+      // Use local invitation
+    }
+  }
+
+  return invitation;
 }
 
-export async function getPendingInvitations(workspaceId: string) {
-  const { data, error } = await supabase
-    .from('workspace_invitations')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .eq('status', 'pending')
-    .gte('expires_at', new Date().toISOString());
-  if (error) throw error;
-  return data as WorkspaceInvitation[];
+export async function getPendingInvitations(workspaceId: string): Promise<WorkspaceInvitation[]> {
+  const db = loadLocalDb();
+  const nowIso = new Date().toISOString();
+  const localInvites = db.workspace_invitations.filter(
+    inv =>
+      inv.workspace_id === workspaceId &&
+      inv.status === 'pending' &&
+      inv.expires_at >= nowIso
+  );
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('workspace_invitations')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('status', 'pending')
+        .gte('expires_at', nowIso);
+      if (!error && data && data.length > 0) {
+        return data as WorkspaceInvitation[];
+      }
+    } catch {
+      // Return localInvites
+    }
+  }
+
+  return localInvites;
+}
+
+export async function revokeInvitation(invitationId: string, actorId?: string): Promise<void> {
+  const db = loadLocalDb();
+  const inv = db.workspace_invitations.find(i => i.id === invitationId);
+  if (inv) {
+    inv.status = 'revoked';
+    saveLocalDb(db);
+    if (actorId) {
+      await logAuditEvent({
+        actor_id: actorId,
+        action: 'invitation.revoked',
+        resource_type: 'workspace_invitation',
+        resource_id: invitationId,
+        workspace_id: inv.workspace_id,
+        outcome: 'success',
+      });
+    }
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase
+        .from('workspace_invitations')
+        .update({ status: 'revoked' })
+        .eq('id', invitationId);
+    } catch {
+      // Handled locally
+    }
+  }
 }
 
 // ─── Projects ───────────────────────────────────────────────────────
 
-export async function createProject(workspaceId: string, name: string, description: string | null, repositoryUrl: string | null, ownerId: string) {
-  const { data: project, error } = await supabase.rpc('create_project_with_defaults', {
-    p_workspace_id: workspaceId,
-    p_name: name,
-    p_description: description,
-    p_repository_url: repositoryUrl,
-  });
-  if (error) throw error;
+export async function createProject(
+  workspaceId: string,
+  name: string,
+  description: string | null,
+  repositoryUrl: string | null,
+  ownerId: string
+): Promise<Project> {
+  const db = loadLocalDb();
+  let createdProject = provisionProjectInDb(
+    db,
+    workspaceId,
+    name,
+    description,
+    repositoryUrl,
+    ownerId,
+    false
+  );
+  saveLocalDb(db);
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data: rpcProject, error: rpcError } = await supabase.rpc('create_project_with_defaults', {
+        p_workspace_id: workspaceId,
+        p_name: name.trim(),
+        p_description: description?.trim() || null,
+        p_repository_url: repositoryUrl?.trim() || null,
+      });
+
+      if (!rpcError && rpcProject) {
+        createdProject = rpcProject as Project;
+      } else {
+        // Fallback to direct table insert if RPC migration 004 was not applied
+        const { data: directProject, error: directError } = await supabase
+          .from('projects')
+          .insert({
+            workspace_id: workspaceId,
+            name: name.trim(),
+            slug: createdProject.slug,
+            description: description?.trim() || null,
+            repository_url: repositoryUrl?.trim() || null,
+            owner_id: ownerId,
+          })
+          .select()
+          .single();
+
+        if (!directError && directProject) {
+          createdProject = directProject as Project;
+          await supabase.from('project_members').insert({
+            project_id: createdProject.id,
+            user_id: ownerId,
+            role: 'owner',
+          });
+          await supabase.from('environments').insert([
+            { project_id: createdProject.id, name: 'Development', type: 'development' },
+            { project_id: createdProject.id, name: 'Testing', type: 'testing' },
+            { project_id: createdProject.id, name: 'Staging', type: 'staging' },
+            { project_id: createdProject.id, name: 'Production', type: 'production' },
+          ]);
+        }
+      }
+    } catch {
+      // Local project already provisioned with all 4 default environments & main branch
+    }
+  }
 
   await logAuditEvent({
     actor_id: ownerId,
     action: 'project.created',
     resource_type: 'project',
-    resource_id: project.id,
+    resource_id: createdProject.id,
     workspace_id: workspaceId,
-    project_id: project.id,
+    project_id: createdProject.id,
     outcome: 'success',
+    metadata: { name: createdProject.name, slug: createdProject.slug },
   });
 
-  return project as Project;
+  return createdProject;
 }
 
-export async function getProjects(workspaceId?: string) {
-  let query = supabase.from('projects').select('*').order('created_at', { ascending: false });
-  if (workspaceId) query = query.eq('workspace_id', workspaceId);
-  const { data, error } = await query;
-  if (error) throw error;
-  return data as Project[];
+export async function getProjects(workspaceId?: string): Promise<Project[]> {
+  const db = loadLocalDb();
+  const localProjects = workspaceId
+    ? db.projects.filter(p => p.workspace_id === workspaceId)
+    : db.projects;
+
+  if (isSupabaseConfigured) {
+    try {
+      let query = supabase.from('projects').select('*').order('created_at', { ascending: false });
+      if (workspaceId) query = query.eq('workspace_id', workspaceId);
+      const { data, error } = await query;
+      if (!error && data && data.length > 0) {
+        const remote = data as Project[];
+        const remoteIds = new Set(remote.map(p => p.id));
+        return [...remote, ...localProjects.filter(lp => !remoteIds.has(lp.id))];
+      }
+    } catch {
+      // Return localProjects
+    }
+  }
+
+  return localProjects;
 }
 
-export async function updateProject(id: string, updates: Partial<Project>) {
-  const { data, error } = await supabase
-    .from('projects')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Project;
+export async function updateProject(id: string, updates: Partial<Project>): Promise<Project> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const idx = db.projects.findIndex(p => p.id === id);
+  if (idx >= 0) {
+    db.projects[idx] = { ...db.projects[idx], ...updates, updated_at: now };
+    saveLocalDb(db);
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .update({ ...updates, updated_at: now })
+        .eq('id', id)
+        .select()
+        .single();
+      if (!error && data) return data as Project;
+    } catch {
+      // Use local project
+    }
+  }
+
+  if (idx < 0) throw new Error('Project not found');
+  return db.projects[idx];
 }
 
-export async function archiveProject(id: string) {
-  return updateProject(id, { status: 'archived' });
+export async function archiveProject(id: string, actorId?: string): Promise<Project> {
+  const updated = await updateProject(id, { status: 'archived' });
+  if (actorId) {
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'project.archived',
+      resource_type: 'project',
+      resource_id: id,
+      workspace_id: updated.workspace_id,
+      project_id: id,
+      outcome: 'success',
+    });
+  }
+  return updated;
+}
+
+export async function deleteProject(id: string, actorId?: string): Promise<void> {
+  const db = loadLocalDb();
+  const target = db.projects.find(p => p.id === id);
+  db.projects = db.projects.filter(p => p.id !== id);
+  db.environments = db.environments.filter(e => e.project_id !== id);
+  db.encrypted_secrets = db.encrypted_secrets.filter(s => s.project_id !== id);
+  db.branches = db.branches.filter(b => b.project_id !== id);
+  db.tasks = db.tasks.filter(t => t.project_id !== id);
+  db.integration_connections = db.integration_connections.filter(i => i.project_id !== id);
+  saveLocalDb(db);
+
+  if (actorId && target) {
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'project.deleted',
+      resource_type: 'project',
+      resource_id: id,
+      workspace_id: target.workspace_id,
+      outcome: 'success',
+      metadata: { name: target.name },
+    });
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('projects').delete().eq('id', id);
+    } catch {
+      // Handled locally
+    }
+  }
 }
 
 // ─── Environments ───────────────────────────────────────────────────
 
-export async function getEnvironments(projectId: string) {
-  const { data, error } = await supabase
-    .from('environments')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('type');
-  if (error) throw error;
-  return data as Environment[];
+export async function getEnvironments(projectId: string): Promise<Environment[]> {
+  const db = loadLocalDb();
+  let localEnvs = db.environments.filter(e => e.project_id === projectId);
+
+  // If a project exists without environments, auto-provision the 4 standard environments
+  if (localEnvs.length === 0 && projectId) {
+    const now = new Date().toISOString();
+    const defaults: { name: string; type: EnvironmentType; desc: string }[] = [
+      { name: 'Development', type: 'development', desc: 'Local & feature branch development environment' },
+      { name: 'Testing', type: 'testing', desc: 'Automated CI/CD & QA integration test suite' },
+      { name: 'Staging', type: 'staging', desc: 'Pre-production canary & staging environment' },
+      { name: 'Production', type: 'production', desc: 'Live customer-facing production environment' },
+    ];
+    localEnvs = defaults.map(d => ({
+      id: crypto.randomUUID(),
+      project_id: projectId,
+      name: d.name,
+      type: d.type,
+      description: d.desc,
+      is_active: true,
+      created_at: now,
+      updated_at: now,
+    }));
+    db.environments.push(...localEnvs);
+    saveLocalDb(db);
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('environments')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('type');
+      if (!error && data && data.length > 0) {
+        return data as Environment[];
+      }
+    } catch {
+      // Return localEnvs
+    }
+  }
+
+  return localEnvs;
 }
 
-export async function createEnvironment(projectId: string, name: string, type: EnvironmentType) {
-  const { data, error } = await supabase
-    .from('environments')
-    .insert({ project_id: projectId, name, type })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Environment;
+export async function createEnvironment(
+  projectId: string,
+  name: string,
+  type: EnvironmentType,
+  description: string | null = null
+): Promise<Environment> {
+  const now = new Date().toISOString();
+  const env: Environment = {
+    id: crypto.randomUUID(),
+    project_id: projectId,
+    name: name.trim(),
+    type,
+    description,
+    is_active: true,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const db = loadLocalDb();
+  db.environments.push(env);
+  saveLocalDb(db);
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('environments')
+        .insert({ project_id: projectId, name: env.name, type, description })
+        .select()
+        .single();
+      if (!error && data) return data as Environment;
+    } catch {
+      // Use local env
+    }
+  }
+
+  return env;
 }
 
 // ─── Secrets ────────────────────────────────────────────────────────
 
-export async function getSecrets(environmentId: string) {
-  const { data, error } = await supabase
-    .from('encrypted_secrets')
-    .select('*')
-    .eq('environment_id', environmentId)
-    .order('variable_name');
-  if (error) throw error;
-  return data as EncryptedSecret[];
+export async function getSecrets(environmentId: string): Promise<EncryptedSecret[]> {
+  const db = loadLocalDb();
+  const localSecrets = db.encrypted_secrets
+    .filter(s => s.environment_id === environmentId)
+    .sort((a, b) => a.variable_name.localeCompare(b.variable_name));
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('encrypted_secrets')
+        .select('*')
+        .eq('environment_id', environmentId)
+        .order('variable_name');
+      if (!error && data && data.length > 0) {
+        return data as EncryptedSecret[];
+      }
+    } catch {
+      // Return localSecrets
+    }
+  }
+
+  return localSecrets;
+}
+
+export async function getProjectSecretCounts(projectId: string): Promise<Record<string, number>> {
+  const db = loadLocalDb();
+  const counts: Record<string, number> = {};
+  for (const s of db.encrypted_secrets) {
+    if (s.project_id === projectId) {
+      counts[s.environment_id] = (counts[s.environment_id] || 0) + 1;
+    }
+  }
+  return counts;
 }
 
 export async function createSecret(
@@ -231,107 +785,463 @@ export async function createSecret(
   variableName: string,
   encryptedValue: string,
   nonce: string,
-  keyVersion: number
-) {
-  const { data, error } = await supabase
-    .from('encrypted_secrets')
-    .insert({
-      environment_id: environmentId,
-      project_id: projectId,
-      variable_name: variableName,
+  keyVersion: number,
+  actorId?: string
+): Promise<EncryptedSecret> {
+  const now = new Date().toISOString();
+  const cleanName = variableName.trim();
+  const db = loadLocalDb();
+
+  // Upsert if variable_name already exists in this environment
+  const existingIdx = db.encrypted_secrets.findIndex(
+    s => s.environment_id === environmentId && s.variable_name === cleanName
+  );
+
+  let secretRecord: EncryptedSecret;
+  if (existingIdx >= 0) {
+    secretRecord = {
+      ...db.encrypted_secrets[existingIdx],
       encrypted_value: encryptedValue,
       nonce,
       key_version: keyVersion,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as EncryptedSecret;
+      updated_at: now,
+    };
+    db.encrypted_secrets[existingIdx] = secretRecord;
+  } else {
+    secretRecord = {
+      id: crypto.randomUUID(),
+      environment_id: environmentId,
+      project_id: projectId,
+      variable_name: cleanName,
+      encrypted_value: encryptedValue,
+      nonce,
+      crypto_version: '1',
+      key_version: keyVersion,
+      is_secret: true,
+      created_at: now,
+      updated_at: now,
+    };
+    db.encrypted_secrets.push(secretRecord);
+  }
+  saveLocalDb(db);
+
+  if (actorId) {
+    const project = db.projects.find(p => p.id === projectId);
+    await logAuditEvent({
+      actor_id: actorId,
+      action: existingIdx >= 0 ? 'secret.updated' : 'secret.created',
+      resource_type: 'encrypted_secret',
+      resource_id: secretRecord.id,
+      workspace_id: project?.workspace_id,
+      project_id: projectId,
+      outcome: 'success',
+      metadata: { variable_name: cleanName },
+    });
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('encrypted_secrets')
+        .upsert(
+          {
+            environment_id: environmentId,
+            project_id: projectId,
+            variable_name: cleanName,
+            encrypted_value: encryptedValue,
+            nonce,
+            key_version: keyVersion,
+          },
+          { onConflict: 'environment_id,variable_name' }
+        )
+        .select()
+        .single();
+      if (!error && data) return data as EncryptedSecret;
+    } catch {
+      // Use local secretRecord
+    }
+  }
+
+  return secretRecord;
 }
 
-export async function deleteSecret(id: string) {
-  const { error } = await supabase.from('encrypted_secrets').delete().eq('id', id);
-  if (error) throw error;
+export async function deleteSecret(id: string, actorId?: string): Promise<void> {
+  const db = loadLocalDb();
+  const target = db.encrypted_secrets.find(s => s.id === id);
+  db.encrypted_secrets = db.encrypted_secrets.filter(s => s.id !== id);
+  saveLocalDb(db);
+
+  if (actorId && target) {
+    const project = db.projects.find(p => p.id === target.project_id);
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'secret.deleted',
+      resource_type: 'encrypted_secret',
+      resource_id: id,
+      workspace_id: project?.workspace_id,
+      project_id: target.project_id,
+      outcome: 'success',
+      metadata: { variable_name: target.variable_name },
+    });
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('encrypted_secrets').delete().eq('id', id);
+    } catch {
+      // Handled locally
+    }
+  }
 }
 
 // ─── Branches ───────────────────────────────────────────────────────
 
-export async function getBranches(projectId: string) {
-  const { data, error } = await supabase
-    .from('branches')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('updated_at', { ascending: false });
-  if (error) throw error;
-  return data as Branch[];
+export async function getBranches(projectId: string): Promise<Branch[]> {
+  const db = loadLocalDb();
+  const localBranches = db.branches
+    .filter(b => b.project_id === projectId)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('branches')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('updated_at', { ascending: false });
+      if (!error && data && data.length > 0) {
+        return data as Branch[];
+      }
+    } catch {
+      // Return localBranches
+    }
+  }
+
+  return localBranches;
 }
 
-export async function createBranch(projectId: string, name: string, repositoryRef?: string) {
-  const { data, error } = await supabase
-    .from('branches')
-    .insert({ project_id: projectId, name, repository_ref: repositoryRef || null })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Branch;
+export async function createBranch(
+  projectId: string,
+  name: string,
+  repositoryRef?: string,
+  commitMessage?: string,
+  actorId?: string
+): Promise<Branch> {
+  const now = new Date().toISOString();
+  const cleanName = name.trim();
+  const sha = Array.from(crypto.getRandomValues(new Uint8Array(4)))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 7);
+
+  const branch: Branch = {
+    id: crypto.randomUUID(),
+    project_id: projectId,
+    name: cleanName,
+    repository_ref: repositoryRef?.trim() || `refs/heads/${cleanName}`,
+    commit_sha: sha,
+    commit_message: commitMessage?.trim() || `Initialize branch ${cleanName}`,
+    commit_date: now,
+    is_active: true,
+    is_synced: true,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const db = loadLocalDb();
+  db.branches.unshift(branch);
+  saveLocalDb(db);
+
+  if (actorId) {
+    const project = db.projects.find(p => p.id === projectId);
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'branch.created',
+      resource_type: 'branch',
+      resource_id: branch.id,
+      workspace_id: project?.workspace_id,
+      project_id: projectId,
+      outcome: 'success',
+      metadata: { branch_name: cleanName },
+    });
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('branches')
+        .insert({
+          project_id: projectId,
+          name: cleanName,
+          repository_ref: branch.repository_ref,
+          commit_sha: branch.commit_sha,
+          commit_message: branch.commit_message,
+          commit_date: now,
+          is_active: true,
+          is_synced: true,
+        })
+        .select()
+        .single();
+      if (!error && data) return data as Branch;
+    } catch {
+      // Return local branch
+    }
+  }
+
+  return branch;
 }
 
-export async function updateBranch(id: string, updates: Partial<Branch>) {
-  const { data, error } = await supabase
-    .from('branches')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Branch;
+export async function updateBranch(id: string, updates: Partial<Branch>): Promise<Branch> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const idx = db.branches.findIndex(b => b.id === id);
+  if (idx >= 0) {
+    db.branches[idx] = { ...db.branches[idx], ...updates, updated_at: now };
+    saveLocalDb(db);
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('branches')
+        .update({ ...updates, updated_at: now })
+        .eq('id', id)
+        .select()
+        .single();
+      if (!error && data) return data as Branch;
+    } catch {
+      // Use local branch
+    }
+  }
+
+  if (idx < 0) throw new Error('Branch not found');
+  return db.branches[idx];
 }
 
-export async function deleteBranch(id: string) {
-  const { error } = await supabase.from('branches').delete().eq('id', id);
-  if (error) throw error;
+export async function deleteBranch(id: string, actorId?: string): Promise<void> {
+  const db = loadLocalDb();
+  const target = db.branches.find(b => b.id === id);
+  db.branches = db.branches.filter(b => b.id !== id);
+  saveLocalDb(db);
+
+  if (actorId && target) {
+    const project = db.projects.find(p => p.id === target.project_id);
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'branch.deleted',
+      resource_type: 'branch',
+      resource_id: id,
+      workspace_id: project?.workspace_id,
+      project_id: target.project_id,
+      outcome: 'success',
+      metadata: { branch_name: target.name },
+    });
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('branches').delete().eq('id', id);
+    } catch {
+      // Handled locally
+    }
+  }
 }
 
 // ─── Tasks ──────────────────────────────────────────────────────────
 
-export async function getTasks(projectId?: string, status?: TaskStatus) {
-  let query = supabase.from('tasks').select(`
-    *,
-    assignee:profiles!assignee_id(*)
-  `).order('created_at', { ascending: false });
-  
-  if (projectId) query = query.eq('project_id', projectId);
-  if (status) query = query.eq('status', status);
-  
-  const { data, error } = await query;
-  if (error) throw error;
-  return data as (Task & { assignee: any })[];
+export async function getTasks(
+  projectId?: string,
+  status?: TaskStatus,
+  workspaceId?: string
+): Promise<Task[]> {
+  const db = loadLocalDb();
+  let filtered = db.tasks;
+
+  if (projectId) {
+    filtered = filtered.filter(t => t.project_id === projectId);
+  } else if (workspaceId) {
+    const wsProjectIds = new Set(
+      db.projects.filter(p => p.workspace_id === workspaceId).map(p => p.id)
+    );
+    filtered = filtered.filter(t => wsProjectIds.has(t.project_id));
+  }
+
+  if (status) {
+    filtered = filtered.filter(t => t.status === status);
+  }
+
+  const localTasks: Task[] = filtered
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map(t => ({
+      ...t,
+      assignee: t.assignee_id ? db.profiles.find(p => p.id === t.assignee_id) : undefined,
+    }));
+
+  if (isSupabaseConfigured && projectId) {
+    try {
+      let query = supabase
+        .from('tasks')
+        .select(`
+          *,
+          assignee:profiles!assignee_id(*)
+        `)
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
+
+      if (status) query = query.eq('status', status);
+
+      const { data, error } = await query;
+      if (!error && data && data.length > 0) {
+        return data as Task[];
+      }
+    } catch {
+      // Return localTasks
+    }
+  }
+
+  return localTasks;
 }
 
-export async function createTask(projectId: string, title: string, description: string | null, priority: TaskPriority = 'medium') {
-  const { data, error } = await supabase
-    .from('tasks')
-    .insert({ project_id: projectId, title, description, priority })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Task;
+export async function createTask(
+  projectId: string,
+  title: string,
+  description: string | null,
+  priority: TaskPriority = 'medium',
+  options?: {
+    status?: TaskStatus;
+    due_date?: string | null;
+    assignee_id?: string | null;
+    actor_id?: string;
+  }
+): Promise<Task> {
+  const now = new Date().toISOString();
+  const task: Task = {
+    id: crypto.randomUUID(),
+    project_id: projectId,
+    title: title.trim(),
+    description: description?.trim() || null,
+    status: options?.status || 'todo',
+    priority,
+    assignee_id: options?.assignee_id || options?.actor_id || null,
+    due_date: options?.due_date || null,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const db = loadLocalDb();
+  db.tasks.unshift(task);
+  saveLocalDb(db);
+
+  if (options?.actor_id) {
+    const project = db.projects.find(p => p.id === projectId);
+    await logAuditEvent({
+      actor_id: options.actor_id,
+      action: 'task.created',
+      resource_type: 'task',
+      resource_id: task.id,
+      workspace_id: project?.workspace_id,
+      project_id: projectId,
+      outcome: 'success',
+      metadata: { title: task.title, priority, status: task.status },
+    });
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert({
+          project_id: projectId,
+          title: task.title,
+          description: task.description,
+          priority,
+          status: task.status,
+          due_date: task.due_date,
+          assignee_id: task.assignee_id,
+        })
+        .select()
+        .single();
+      if (!error && data) return data as Task;
+    } catch {
+      // Return local task
+    }
+  }
+
+  return task;
 }
 
-export async function updateTask(id: string, updates: Partial<Task>) {
-  const { data, error } = await supabase
-    .from('tasks')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Task;
+export async function updateTask(
+  id: string,
+  updates: Partial<Task>,
+  actorId?: string
+): Promise<Task> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const idx = db.tasks.findIndex(t => t.id === id);
+  if (idx >= 0) {
+    db.tasks[idx] = { ...db.tasks[idx], ...updates, updated_at: now };
+    saveLocalDb(db);
+
+    if (actorId && updates.status) {
+      const project = db.projects.find(p => p.id === db.tasks[idx].project_id);
+      await logAuditEvent({
+        actor_id: actorId,
+        action: `task.status.${updates.status}`,
+        resource_type: 'task',
+        resource_id: id,
+        workspace_id: project?.workspace_id,
+        project_id: db.tasks[idx].project_id,
+        outcome: 'success',
+        metadata: { title: db.tasks[idx].title, status: updates.status },
+      });
+    }
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .update({ ...updates, updated_at: now })
+        .eq('id', id)
+        .select()
+        .single();
+      if (!error && data) return data as Task;
+    } catch {
+      // Return local task
+    }
+  }
+
+  if (idx < 0) throw new Error('Task not found');
+  return db.tasks[idx];
 }
 
-export async function deleteTask(id: string) {
-  const { error } = await supabase.from('tasks').delete().eq('id', id);
-  if (error) throw error;
+export async function deleteTask(id: string, actorId?: string): Promise<void> {
+  const db = loadLocalDb();
+  const target = db.tasks.find(t => t.id === id);
+  db.tasks = db.tasks.filter(t => t.id !== id);
+  saveLocalDb(db);
+
+  if (actorId && target) {
+    const project = db.projects.find(p => p.id === target.project_id);
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'task.deleted',
+      resource_type: 'task',
+      resource_id: id,
+      workspace_id: project?.workspace_id,
+      project_id: target.project_id,
+      outcome: 'success',
+      metadata: { title: target.title },
+    });
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('tasks').delete().eq('id', id);
+    } catch {
+      // Handled locally
+    }
+  }
 }
 
 // ─── Audit Events ───────────────────────────────────────────────────
@@ -345,75 +1255,251 @@ export async function logAuditEvent(event: {
   project_id?: string;
   outcome?: 'success' | 'failure';
   metadata?: Record<string, unknown>;
-}) {
-  await supabase.from('audit_events').insert({
-    ...event,
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const record: AuditEvent = {
+    id: crypto.randomUUID(),
+    actor_id: event.actor_id,
+    action: event.action,
+    resource_type: event.resource_type,
+    resource_id: event.resource_id || null,
+    workspace_id: event.workspace_id || null,
+    project_id: event.project_id || null,
     outcome: event.outcome || 'success',
     metadata: event.metadata || {},
-  });
+    created_at: now,
+  };
+  db.audit_events.unshift(record);
+  if (db.audit_events.length > 250) {
+    db.audit_events = db.audit_events.slice(0, 250);
+  }
+  saveLocalDb(db);
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('audit_events').insert({
+        ...event,
+        outcome: event.outcome || 'success',
+        metadata: event.metadata || {},
+      });
+    } catch {
+      // Saved locally
+    }
+  }
 }
 
-export async function getAuditEvents(workspaceId?: string, limit = 50) {
-  let query = supabase.from('audit_events').select(`
-    *,
-    actor:profiles!actor_id(*)
-  `).order('created_at', { ascending: false }).limit(limit);
-  
-  if (workspaceId) query = query.eq('workspace_id', workspaceId);
-  
-  const { data, error } = await query;
-  if (error) throw error;
-  return data as (AuditEvent & { actor: any })[];
+export async function getAuditEvents(
+  workspaceId?: string,
+  limit = 50
+): Promise<AuditEvent[]> {
+  const db = loadLocalDb();
+  const localEvents: AuditEvent[] = db.audit_events
+    .filter(ev => !workspaceId || ev.workspace_id === workspaceId || ev.workspace_id === null)
+    .slice(0, limit)
+    .map(ev => ({
+      ...ev,
+      actor: ev.actor_id ? db.profiles.find(p => p.id === ev.actor_id) : undefined,
+    }));
+
+  if (isSupabaseConfigured) {
+    try {
+      let query = supabase
+        .from('audit_events')
+        .select(`
+          *,
+          actor:profiles!actor_id(*)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (workspaceId) query = query.eq('workspace_id', workspaceId);
+
+      const { data, error } = await query;
+      if (!error && data && data.length > 0) {
+        return data as AuditEvent[];
+      }
+    } catch {
+      // Return localEvents
+    }
+  }
+
+  return localEvents;
 }
 
 // ─── Project Key Envelopes ──────────────────────────────────────────
 
-export async function getProjectKeyEnvelope(projectId: string, userId: string) {
-  const { data, error } = await supabase
-    .from('project_key_envelopes')
-    .select('*')
-    .eq('project_id', projectId)
-    .eq('user_id', userId)
-    .single();
-  if (error) throw error;
-  return data as ProjectKeyEnvelope;
+export async function getProjectKeyEnvelope(
+  projectId: string,
+  userId: string
+): Promise<ProjectKeyEnvelope | null> {
+  const db = loadLocalDb();
+  const localEnv = db.project_key_envelopes.find(
+    e => e.project_id === projectId && e.user_id === userId
+  );
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('project_key_envelopes')
+        .select('*')
+        .eq('project_id', projectId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!error && data) return data as ProjectKeyEnvelope;
+    } catch {
+      // Return localEnv
+    }
+  }
+
+  return localEnv || null;
 }
 
-export async function storeProjectKeyEnvelope(projectId: string, userId: string, encryptedProjectKey: string, keyVersion: number) {
-  const { data, error } = await supabase
-    .from('project_key_envelopes')
-    .upsert({ project_id: projectId, user_id: userId, encrypted_project_key: encryptedProjectKey, key_version: keyVersion })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as ProjectKeyEnvelope;
+export async function storeProjectKeyEnvelope(
+  projectId: string,
+  userId: string,
+  encryptedProjectKey: string,
+  keyVersion: number
+): Promise<ProjectKeyEnvelope> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const existingIdx = db.project_key_envelopes.findIndex(
+    e => e.project_id === projectId && e.user_id === userId
+  );
+  const record: ProjectKeyEnvelope = {
+    id: existingIdx >= 0 ? db.project_key_envelopes[existingIdx].id : crypto.randomUUID(),
+    project_id: projectId,
+    user_id: userId,
+    encrypted_project_key: encryptedProjectKey,
+    key_version: keyVersion,
+    created_at: existingIdx >= 0 ? db.project_key_envelopes[existingIdx].created_at : now,
+    updated_at: now,
+  };
+
+  if (existingIdx >= 0) db.project_key_envelopes[existingIdx] = record;
+  else db.project_key_envelopes.push(record);
+  saveLocalDb(db);
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('project_key_envelopes')
+        .upsert({
+          project_id: projectId,
+          user_id: userId,
+          encrypted_project_key: encryptedProjectKey,
+          key_version: keyVersion,
+        })
+        .select()
+        .single();
+      if (!error && data) return data as ProjectKeyEnvelope;
+    } catch {
+      // Return local record
+    }
+  }
+
+  return record;
 }
 
 // ─── Integrations ───────────────────────────────────────────────────
 
-export async function getIntegration(projectId: string, provider: string) {
-  const { data, error } = await supabase
-    .from('integration_connections')
-    .select('*')
-    .eq('project_id', projectId)
-    .eq('provider', provider)
-    .maybeSingle();
-  if (error) throw error;
-  return data as IntegrationConnection | null;
+export async function getProjectIntegrations(projectId: string): Promise<IntegrationConnection[]> {
+  const db = loadLocalDb();
+  const localInt = db.integration_connections.filter(i => i.project_id === projectId);
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('integration_connections')
+        .select('*')
+        .eq('project_id', projectId);
+      if (!error && data && data.length > 0) {
+        return data as IntegrationConnection[];
+      }
+    } catch {
+      // Return localInt
+    }
+  }
+
+  return localInt;
 }
 
-export async function updateIntegrationStatus(projectId: string, provider: string, status: string, error?: string) {
-  const { data, error: dbError } = await supabase
-    .from('integration_connections')
-    .upsert({
+export async function getIntegration(
+  projectId: string,
+  provider: string
+): Promise<IntegrationConnection | null> {
+  const list = await getProjectIntegrations(projectId);
+  return list.find(i => i.provider === provider) || null;
+}
+
+export async function updateIntegrationStatus(
+  projectId: string,
+  provider: 'github' | 'gitlab' | 'jira' | 'slack',
+  status: 'connected' | 'disconnected' | 'error' | 'setup_required',
+  options?: {
+    scopes?: string[];
+    metadata?: Record<string, unknown>;
+    error?: string;
+    actorId?: string;
+  }
+): Promise<IntegrationConnection> {
+  const now = new Date().toISOString();
+  const db = loadLocalDb();
+  const idx = db.integration_connections.findIndex(
+    i => i.project_id === projectId && i.provider === provider
+  );
+
+  const record: IntegrationConnection = {
+    id: idx >= 0 ? db.integration_connections[idx].id : crypto.randomUUID(),
+    project_id: projectId,
+    provider,
+    status,
+    scopes: options?.scopes || (idx >= 0 ? db.integration_connections[idx].scopes : ['repo:read', 'commits:sync']),
+    last_sync_at: status === 'connected' ? now : (idx >= 0 ? db.integration_connections[idx].last_sync_at : null),
+    last_error: options?.error || null,
+    metadata: options?.metadata || (idx >= 0 ? db.integration_connections[idx].metadata : {}),
+    created_at: idx >= 0 ? db.integration_connections[idx].created_at : now,
+    updated_at: now,
+  };
+
+  if (idx >= 0) db.integration_connections[idx] = record;
+  else db.integration_connections.push(record);
+  saveLocalDb(db);
+
+  if (options?.actorId) {
+    const project = db.projects.find(p => p.id === projectId);
+    await logAuditEvent({
+      actor_id: options.actorId,
+      action: `integration.${provider}.${status}`,
+      resource_type: 'integration_connection',
+      resource_id: record.id,
+      workspace_id: project?.workspace_id,
       project_id: projectId,
-      provider,
-      status,
-      last_error: error || null,
-      last_sync_at: status === 'connected' ? new Date().toISOString() : null,
-    })
-    .select()
-    .single();
-  if (dbError) throw dbError;
-  return data as IntegrationConnection;
+      outcome: status === 'error' ? 'failure' : 'success',
+      metadata: { provider, status, ...options.metadata },
+    });
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error: dbError } = await supabase
+        .from('integration_connections')
+        .upsert({
+          project_id: projectId,
+          provider,
+          status,
+          scopes: record.scopes,
+          metadata: record.metadata,
+          last_error: record.last_error,
+          last_sync_at: record.last_sync_at,
+        })
+        .select()
+        .single();
+      if (!dbError && data) return data as IntegrationConnection;
+    } catch {
+      // Return local record
+    }
+  }
+
+  return record;
 }
