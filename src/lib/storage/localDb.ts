@@ -31,6 +31,7 @@ export interface LocalAuthUser {
 interface LocalDatabaseSchema {
   users: LocalAuthUser[];
   currentSessionUserId: string | null;
+  deleted_ids: string[];
   profiles: Profile[];
   user_vaults: UserVault[];
   user_crypto_keys: UserCryptoKey[];
@@ -54,6 +55,7 @@ function createEmptyDb(): LocalDatabaseSchema {
   return {
     users: [],
     currentSessionUserId: null,
+    deleted_ids: [],
     profiles: [],
     user_vaults: [],
     user_crypto_keys: [],
@@ -81,6 +83,7 @@ export function loadLocalDb(): LocalDatabaseSchema {
     return {
       ...createEmptyDb(),
       ...parsed,
+      deleted_ids: Array.isArray(parsed.deleted_ids) ? parsed.deleted_ids : [],
     };
   } catch {
     return createEmptyDb();
@@ -90,6 +93,17 @@ export function loadLocalDb(): LocalDatabaseSchema {
 export function saveLocalDb(db: LocalDatabaseSchema): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(db));
+}
+
+export function markIdDeleted(db: LocalDatabaseSchema, id: string): void {
+  if (!id) return;
+  if (!db.deleted_ids.includes(id)) {
+    db.deleted_ids.push(id);
+  }
+}
+
+export function isIdDeleted(db: LocalDatabaseSchema, id: string): boolean {
+  return Boolean(id && db.deleted_ids.includes(id));
 }
 
 export async function hashString(input: string): Promise<string> {
