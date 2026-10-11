@@ -582,31 +582,76 @@ export async function getProjects(workspaceId?: string): Promise<Project[]> {
   return localProjects;
 }
 
-export async function updateProject(id: string, updates: Partial<Project>): Promise<Project> {
+export async function updateProject(
+  id: string,
+  updates: Partial<Project>,
+  actorId?: string
+): Promise<Project> {
   const now = new Date().toISOString();
+  const normalizedUpdates: Partial<Project> = { ...updates };
+
+  if (typeof normalizedUpdates.name === 'string' && !normalizedUpdates.slug) {
+    const baseSlug = normalizedUpdates.name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    if (baseSlug) {
+      normalizedUpdates.slug = baseSlug;
+    }
+  }
+
   const db = loadLocalDb();
   const idx = db.projects.findIndex(p => p.id === id);
+  let updatedLocal: Project | null = null;
   if (idx >= 0) {
-    db.projects[idx] = { ...db.projects[idx], ...updates, updated_at: now };
+    db.projects[idx] = { ...db.projects[idx], ...normalizedUpdates, updated_at: now };
+    updatedLocal = db.projects[idx];
     saveLocalDb(db);
   }
+
+  let finalProject: Project | null = updatedLocal;
 
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
         .from('projects')
-        .update({ ...updates, updated_at: now })
+        .update({ ...normalizedUpdates, updated_at: now })
         .eq('id', id)
         .select()
         .single();
-      if (!error && data) return data as Project;
+      if (!error && data) {
+        finalProject = data as Project;
+        if (idx >= 0) {
+          db.projects[idx] = finalProject;
+          saveLocalDb(db);
+        }
+      }
     } catch {
       // Use local project
     }
   }
 
-  if (idx < 0) throw new Error('Project not found');
-  return db.projects[idx];
+  if (!finalProject) throw new Error('Project not found');
+
+  if (actorId) {
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'project.updated',
+      resource_type: 'project',
+      resource_id: id,
+      workspace_id: finalProject.workspace_id,
+      project_id: id,
+      outcome: 'success',
+      metadata: {
+        name: finalProject.name,
+        repository_url: finalProject.repository_url,
+        status: finalProject.status,
+      },
+    });
+  }
+
+  return finalProject;
 }
 
 export async function archiveProject(id: string, actorId?: string): Promise<Project> {
