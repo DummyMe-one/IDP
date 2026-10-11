@@ -2167,19 +2167,20 @@ function ProjectsPage() {
 
   const handleToggleStatus = async (projectId: string, currentStatus: 'active' | 'paused' | 'archived') => {
     const nextStatus = currentStatus === 'active' ? 'paused' : 'active';
-    await updateProject(projectId, { status: nextStatus }, user?.id);
-    await refreshProjects();
+    const updated = await updateProject(projectId, { status: nextStatus }, user?.id);
+    await refreshProjects(updated.id);
   };
 
   const handleArchiveProject = async (projectId: string) => {
-    if (!user) return;
-    await archiveProject(projectId, user.id);
-    await refreshProjects();
+    const updated = await archiveProject(projectId, user?.id);
+    await refreshProjects(updated.id);
   };
 
   const handleDeleteProject = async (projectId: string) => {
-    if (!user) return;
-    await deleteProject(projectId, user.id);
+    if (editingProject?.id === projectId) {
+      setEditingProject(null);
+    }
+    await deleteProject(projectId, user?.id);
     await refreshProjects();
   };
 

@@ -5,6 +5,8 @@ import {
   slugify,
   provisionProjectInDb,
   ensureUserProvisioned,
+  markIdDeleted,
+  isIdDeleted,
 } from '@/lib/storage/localDb';
 import type {
   Workspace,
@@ -61,11 +63,14 @@ export async function createWorkspace(
 
       if (!error && workspace) {
         createdWorkspace = workspace as Workspace;
-        await supabase.from('workspace_members').insert({
-          workspace_id: createdWorkspace.id,
-          user_id: ownerId,
-          role: 'owner',
-        });
+        await supabase.from('workspace_members').upsert(
+          {
+            workspace_id: createdWorkspace.id,
+            user_id: ownerId,
+            role: 'owner',
+          },
+          { onConflict: 'workspace_id,user_id' }
+        );
       }
     } catch {
       // Fallback to localDb below
@@ -110,7 +115,9 @@ export async function getWorkspaces(
   const localResult: (Workspace & { member_role: UserRole })[] = [];
 
   for (const m of localMemberships) {
-    const ws = db.workspaces.find(w => w.id === m.workspace_id && !w.is_archived);
+    const ws = db.workspaces.find(
+      w => w.id === m.workspace_id && !w.is_archived && !isIdDeleted(db, w.id)
+    );
     if (ws) {
       localResult.push({ ...ws, member_role: m.role });
     }
@@ -139,7 +146,7 @@ export async function getWorkspaces(
         for (const d of memberData) {
           if (d.workspace) {
             const ws = d.workspace as unknown as Workspace;
-            if (!ws.is_archived) {
+            if (!ws.is_archived && !isIdDeleted(db, ws.id)) {
               remoteMap.set(ws.id, { ...ws, member_role: d.role as UserRole });
             }
           }
@@ -148,9 +155,8 @@ export async function getWorkspaces(
 
       if (ownedData) {
         for (const ow of ownedData as Workspace[]) {
-          if (!remoteMap.has(ow.id)) {
+          if (!ow.is_archived && !isIdDeleted(db, ow.id) && !remoteMap.has(ow.id)) {
             remoteMap.set(ow.id, { ...ow, member_role: 'owner' });
-            // Backfill missing workspace_members row if needed
             await supabase
               .from('workspace_members')
               .upsert(
@@ -164,11 +170,21 @@ export async function getWorkspaces(
       const remoteWorkspaces = Array.from(remoteMap.values());
 
       if (remoteWorkspaces.length > 0) {
+        const mergedResult: (Workspace & { member_role: UserRole })[] = [];
         for (const rw of remoteWorkspaces) {
           const { member_role, ...wsOnly } = rw;
           const existingIdx = db.workspaces.findIndex(w => w.id === rw.id);
+          let effectiveWs: Workspace = wsOnly;
           if (existingIdx >= 0) {
-            db.workspaces[existingIdx] = wsOnly;
+            const localWs = db.workspaces[existingIdx];
+            if (localWs.is_archived) {
+              continue;
+            }
+            effectiveWs =
+              localWs.updated_at > wsOnly.updated_at
+                ? localWs
+                : wsOnly;
+            db.workspaces[existingIdx] = effectiveWs;
           } else {
             db.workspaces.push(wsOnly);
           }
@@ -181,11 +197,13 @@ export async function getWorkspaces(
               joined_at: rw.created_at,
             });
           }
+          mergedResult.push({ ...effectiveWs, member_role });
         }
         saveLocalDb(db);
-        return remoteWorkspaces;
+        if (mergedResult.length > 0) {
+          return mergedResult;
+        }
       } else if (localResult.length > 0) {
-        // User has no workspaces in Supabase yet — sync their primary local workspace to Supabase
         const primary = localResult[0];
         const { data: syncedWs, error: syncErr } = await supabase
           .from('workspaces')
@@ -238,7 +256,14 @@ export async function updateWorkspace(id: string, updates: Partial<Workspace>): 
         .eq('id', id)
         .select()
         .single();
-      if (!error && data) return data as Workspace;
+      if (!error && data) {
+        const updatedWs = data as Workspace;
+        if (idx >= 0) {
+          db.workspaces[idx] = updatedWs;
+          saveLocalDb(db);
+        }
+        return updatedWs;
+      }
     } catch {
       // Use local result
     }
@@ -249,6 +274,9 @@ export async function updateWorkspace(id: string, updates: Partial<Workspace>): 
 }
 
 export async function archiveWorkspace(id: string, actorId?: string): Promise<Workspace> {
+  const db = loadLocalDb();
+  markIdDeleted(db, id);
+  saveLocalDb(db);
   const updated = await updateWorkspace(id, { is_archived: true });
   if (actorId) {
     await logAuditEvent({
@@ -270,7 +298,12 @@ export async function getWorkspaceMembers(
 ): Promise<(WorkspaceMember & { profile: Profile | null })[]> {
   const db = loadLocalDb();
   const localMembers = db.workspace_members
-    .filter(wm => wm.workspace_id === workspaceId)
+    .filter(
+      wm =>
+        wm.workspace_id === workspaceId &&
+        !isIdDeleted(db, wm.id) &&
+        !isIdDeleted(db, `ws-member:${workspaceId}:${wm.user_id}`)
+    )
     .map(wm => ({
       ...wm,
       profile: db.profiles.find(p => p.id === wm.user_id) || {
@@ -293,7 +326,30 @@ export async function getWorkspaceMembers(
         `)
         .eq('workspace_id', workspaceId);
       if (!error && data && data.length > 0) {
-        return data as (WorkspaceMember & { profile: Profile | null })[];
+        const remote = (data as (WorkspaceMember & { profile: Profile | null })[]).filter(
+          rm =>
+            !isIdDeleted(db, rm.id) &&
+            !isIdDeleted(db, `ws-member:${workspaceId}:${rm.user_id}`)
+        );
+        for (const rm of remote) {
+          const localMatch = db.workspace_members.find(
+            wm => wm.workspace_id === workspaceId && wm.user_id === rm.user_id
+          );
+          if (localMatch) {
+            rm.role = localMatch.role;
+          } else {
+            db.workspace_members.push({
+              id: rm.id,
+              workspace_id: rm.workspace_id,
+              user_id: rm.user_id,
+              role: rm.role,
+              joined_at: rm.joined_at,
+            });
+          }
+        }
+        saveLocalDb(db);
+        const remoteUserIds = new Set(remote.map(r => r.user_id));
+        return [...remote, ...localMembers.filter(lm => !remoteUserIds.has(lm.user_id))];
       }
     } catch {
       // Fallback to localMembers
@@ -310,6 +366,8 @@ export async function addWorkspaceMember(
 ): Promise<WorkspaceMember> {
   const now = new Date().toISOString();
   const db = loadLocalDb();
+  db.deleted_ids = db.deleted_ids.filter(id => id !== `ws-member:${workspaceId}:${userId}`);
+
   const existing = db.workspace_members.find(
     wm => wm.workspace_id === workspaceId && wm.user_id === userId
   );
@@ -333,10 +391,21 @@ export async function addWorkspaceMember(
     try {
       const { data, error } = await supabase
         .from('workspace_members')
-        .insert({ workspace_id: workspaceId, user_id: userId, role })
+        .upsert(
+          { workspace_id: workspaceId, user_id: userId, role },
+          { onConflict: 'workspace_id,user_id' }
+        )
         .select()
         .single();
-      if (!error && data) return data as WorkspaceMember;
+      if (!error && data) {
+        const remoteMember = data as WorkspaceMember;
+        const idx = db.workspace_members.findIndex(wm => wm.id === member.id);
+        if (idx >= 0) {
+          db.workspace_members[idx] = remoteMember;
+          saveLocalDb(db);
+        }
+        return remoteMember;
+      }
     } catch {
       // Use local member
     }
@@ -346,6 +415,13 @@ export async function addWorkspaceMember(
 
 export async function removeWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
   const db = loadLocalDb();
+  const targets = db.workspace_members.filter(
+    wm => wm.workspace_id === workspaceId && wm.user_id === userId
+  );
+  for (const t of targets) {
+    markIdDeleted(db, t.id);
+  }
+  markIdDeleted(db, `ws-member:${workspaceId}:${userId}`);
   db.workspace_members = db.workspace_members.filter(
     wm => !(wm.workspace_id === workspaceId && wm.user_id === userId)
   );
@@ -421,7 +497,6 @@ export async function createInvitation(
   };
 
   const db = loadLocalDb();
-  // Check if invited email already exists as a local user; if so, also add them or keep invite
   const matchingUser = db.users.find(u => u.email.toLowerCase() === invitation.email);
   if (matchingUser) {
     const alreadyInWs = db.workspace_members.some(
@@ -466,7 +541,15 @@ export async function createInvitation(
         })
         .select()
         .single();
-      if (!error && data) return data as WorkspaceInvitation;
+      if (!error && data) {
+        const remoteInv = data as WorkspaceInvitation;
+        const idx = db.workspace_invitations.findIndex(i => i.id === invitation.id);
+        if (idx >= 0) {
+          db.workspace_invitations[idx] = remoteInv;
+          saveLocalDb(db);
+        }
+        return remoteInv;
+      }
     } catch {
       // Use local invitation
     }
@@ -482,7 +565,8 @@ export async function getPendingInvitations(workspaceId: string): Promise<Worksp
     inv =>
       inv.workspace_id === workspaceId &&
       inv.status === 'pending' &&
-      inv.expires_at >= nowIso
+      inv.expires_at >= nowIso &&
+      !isIdDeleted(db, inv.id)
   );
 
   if (isSupabaseConfigured) {
@@ -494,7 +578,9 @@ export async function getPendingInvitations(workspaceId: string): Promise<Worksp
         .eq('status', 'pending')
         .gte('expires_at', nowIso);
       if (!error && data && data.length > 0) {
-        return data as WorkspaceInvitation[];
+        const remote = (data as WorkspaceInvitation[]).filter(inv => !isIdDeleted(db, inv.id));
+        const remoteIds = new Set(remote.map(i => i.id));
+        return [...remote, ...localInvites.filter(li => !remoteIds.has(li.id))];
       }
     } catch {
       // Return localInvites
@@ -506,20 +592,22 @@ export async function getPendingInvitations(workspaceId: string): Promise<Worksp
 
 export async function revokeInvitation(invitationId: string, actorId?: string): Promise<void> {
   const db = loadLocalDb();
+  markIdDeleted(db, invitationId);
   const inv = db.workspace_invitations.find(i => i.id === invitationId);
   if (inv) {
     inv.status = 'revoked';
-    saveLocalDb(db);
-    if (actorId) {
-      await logAuditEvent({
-        actor_id: actorId,
-        action: 'invitation.revoked',
-        resource_type: 'workspace_invitation',
-        resource_id: invitationId,
-        workspace_id: inv.workspace_id,
-        outcome: 'success',
-      });
-    }
+  }
+  saveLocalDb(db);
+
+  if (actorId && inv) {
+    await logAuditEvent({
+      actor_id: actorId,
+      action: 'invitation.revoked',
+      resource_type: 'workspace_invitation',
+      resource_id: invitationId,
+      workspace_id: inv.workspace_id,
+      outcome: 'success',
+    });
   }
 
   if (isSupabaseConfigured) {
@@ -535,6 +623,37 @@ export async function revokeInvitation(invitationId: string, actorId?: string): 
 }
 
 // ─── Projects ───────────────────────────────────────────────────────
+
+function replaceLocalProjectId(
+  localId: string,
+  remoteProject: Project
+): void {
+  const db = loadLocalDb();
+  const idx = db.projects.findIndex(p => p.id === localId);
+  if (idx >= 0) {
+    db.projects[idx] = remoteProject;
+  } else if (!db.projects.some(p => p.id === remoteProject.id)) {
+    db.projects.unshift(remoteProject);
+  }
+  if (localId !== remoteProject.id) {
+    for (const pm of db.project_members) {
+      if (pm.project_id === localId) pm.project_id = remoteProject.id;
+    }
+    for (const env of db.environments) {
+      if (env.project_id === localId) env.project_id = remoteProject.id;
+    }
+    for (const br of db.branches) {
+      if (br.project_id === localId) br.project_id = remoteProject.id;
+    }
+    for (const t of db.tasks) {
+      if (t.project_id === localId) t.project_id = remoteProject.id;
+    }
+    db.projects = db.projects.filter(
+      (p, i) => p.id !== localId && db.projects.findIndex(x => x.id === p.id) === i
+    );
+  }
+  saveLocalDb(db);
+}
 
 export async function createProject(
   workspaceId: string,
@@ -553,6 +672,7 @@ export async function createProject(
     ownerId,
     false
   );
+  const provisionalLocalId = createdProject.id;
   saveLocalDb(db);
 
   if (isSupabaseConfigured) {
@@ -590,6 +710,7 @@ export async function createProject(
 
       if (!rpcError && rpcProject) {
         createdProject = rpcProject as Project;
+        replaceLocalProjectId(provisionalLocalId, createdProject);
       } else {
         // Fallback to direct table insert if RPC migration was not applied
         const { data: directProject, error: directError } = await supabase
@@ -607,6 +728,7 @@ export async function createProject(
 
         if (!directError && directProject) {
           createdProject = directProject as Project;
+          replaceLocalProjectId(provisionalLocalId, createdProject);
           await supabase.from('project_members').upsert(
             {
               project_id: createdProject.id,
@@ -647,9 +769,12 @@ export async function createProject(
 
 export async function getProjects(workspaceId?: string): Promise<Project[]> {
   const db = loadLocalDb();
-  const localProjects = workspaceId
-    ? db.projects.filter(p => p.workspace_id === workspaceId)
-    : db.projects;
+  const filterProjects = (list: Project[]) =>
+    list.filter(
+      p =>
+        !isIdDeleted(db, p.id) &&
+        (!workspaceId || p.workspace_id === workspaceId)
+    );
 
   if (isSupabaseConfigured) {
     try {
@@ -657,16 +782,38 @@ export async function getProjects(workspaceId?: string): Promise<Project[]> {
       if (workspaceId) query = query.eq('workspace_id', workspaceId);
       const { data, error } = await query;
       if (!error && data && data.length > 0) {
-        const remote = data as Project[];
-        const remoteIds = new Set(remote.map(p => p.id));
-        return [...remote, ...localProjects.filter(lp => !remoteIds.has(lp.id))];
+        const remote = (data as Project[]).filter(p => !isIdDeleted(db, p.id));
+        const mergedRemote: Project[] = [];
+
+        for (const rp of remote) {
+          const localIdx = db.projects.findIndex(lp => lp.id === rp.id);
+          if (localIdx >= 0) {
+            const localProj = db.projects[localIdx];
+            // Prefer local project state if it was updated more recently (e.g., edited/paused/archived while RLS was pending)
+            const chosen =
+              localProj.updated_at > rp.updated_at ? localProj : rp;
+            db.projects[localIdx] = chosen;
+            mergedRemote.push(chosen);
+          } else {
+            db.projects.push(rp);
+            mergedRemote.push(rp);
+          }
+        }
+        saveLocalDb(db);
+
+        const remoteIds = new Set(mergedRemote.map(p => p.id));
+        const remoteSlugs = new Set(mergedRemote.map(p => `${p.workspace_id}:${p.slug}`));
+        const localExtras = filterProjects(db.projects).filter(
+          lp => !remoteIds.has(lp.id) && !remoteSlugs.has(`${lp.workspace_id}:${lp.slug}`)
+        );
+        return [...mergedRemote, ...localExtras];
       }
     } catch {
-      // Return localProjects
+      // Return localProjects below
     }
   }
 
-  return localProjects;
+  return filterProjects(db.projects);
 }
 
 export async function updateProject(
@@ -689,7 +836,7 @@ export async function updateProject(
   }
 
   const db = loadLocalDb();
-  const idx = db.projects.findIndex(p => p.id === id);
+  let idx = db.projects.findIndex(p => p.id === id);
   let updatedLocal: Project | null = null;
   if (idx >= 0) {
     db.projects[idx] = { ...db.projects[idx], ...normalizedUpdates, updated_at: now };
@@ -701,25 +848,76 @@ export async function updateProject(
 
   if (isSupabaseConfigured) {
     try {
-      const { data, error } = await supabase
-        .from('projects')
-        .update({ ...normalizedUpdates, updated_at: now })
-        .eq('id', id)
-        .select()
-        .single();
-      if (!error && data) {
-        finalProject = data as Project;
+      // Ensure workspace_members row exists before updating so legacy RLS policies succeed
+      const wsId = updatedLocal?.workspace_id || updates.workspace_id;
+      const uid = actorId || updatedLocal?.owner_id;
+      if (wsId && uid) {
+        await supabase.from('workspace_members').upsert(
+          { workspace_id: wsId, user_id: uid, role: 'owner' },
+          { onConflict: 'workspace_id,user_id' }
+        );
+      }
+
+      // First try SECURITY DEFINER RPC if migration 005 is installed
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('update_project_safe', {
+        p_project_id: id,
+        p_name: normalizedUpdates.name ?? null,
+        p_slug: normalizedUpdates.slug ?? null,
+        p_description:
+          normalizedUpdates.description !== undefined ? normalizedUpdates.description : null,
+        p_repository_url:
+          normalizedUpdates.repository_url !== undefined ? normalizedUpdates.repository_url : null,
+        p_status: normalizedUpdates.status ?? null,
+      });
+
+      if (!rpcErr && rpcData) {
+        finalProject = rpcData as Project;
+      } else {
+        const { data, error } = await supabase
+          .from('projects')
+          .update({ ...normalizedUpdates, updated_at: now })
+          .eq('id', id)
+          .select()
+          .single();
+        if (!error && data) {
+          finalProject = data as Project;
+        }
+      }
+
+      if (finalProject) {
+        idx = db.projects.findIndex(p => p.id === id);
         if (idx >= 0) {
           db.projects[idx] = finalProject;
-          saveLocalDb(db);
+        } else {
+          db.projects.unshift(finalProject);
         }
+        saveLocalDb(db);
       }
     } catch {
       // Use local project
     }
   }
 
-  if (!finalProject) throw new Error('Project not found');
+  if (!finalProject) {
+    // Even if the project wasn't cached in localDb before and Supabase failed, synthesize and persist the updated record
+    const fallbackProject: Project = {
+      id,
+      workspace_id: updates.workspace_id || db.workspaces[0]?.id || '',
+      name: normalizedUpdates.name || 'Updated Project',
+      slug: normalizedUpdates.slug || slugify(normalizedUpdates.name || 'updated-project'),
+      description: normalizedUpdates.description ?? null,
+      repository_url: normalizedUpdates.repository_url ?? null,
+      status: normalizedUpdates.status || 'active',
+      owner_id: actorId || db.currentSessionUserId || '',
+      encryption_initialized: true,
+      key_version: 1,
+      created_at: now,
+      updated_at: now,
+    };
+    db.projects.unshift(fallbackProject);
+    saveLocalDb(db);
+    finalProject = fallbackProject;
+  }
 
   if (actorId) {
     await logAuditEvent({
@@ -742,7 +940,7 @@ export async function updateProject(
 }
 
 export async function archiveProject(id: string, actorId?: string): Promise<Project> {
-  const updated = await updateProject(id, { status: 'archived' });
+  const updated = await updateProject(id, { status: 'archived' }, actorId);
   if (actorId) {
     await logAuditEvent({
       actor_id: actorId,
@@ -760,7 +958,16 @@ export async function archiveProject(id: string, actorId?: string): Promise<Proj
 export async function deleteProject(id: string, actorId?: string): Promise<void> {
   const db = loadLocalDb();
   const target = db.projects.find(p => p.id === id);
+
+  // Record tombstone for project and all child resources so it never resurfaces from stale remote fetches
+  markIdDeleted(db, id);
+  for (const e of db.environments.filter(x => x.project_id === id)) markIdDeleted(db, e.id);
+  for (const s of db.encrypted_secrets.filter(x => x.project_id === id)) markIdDeleted(db, s.id);
+  for (const b of db.branches.filter(x => x.project_id === id)) markIdDeleted(db, b.id);
+  for (const t of db.tasks.filter(x => x.project_id === id)) markIdDeleted(db, t.id);
+
   db.projects = db.projects.filter(p => p.id !== id);
+  db.project_members = db.project_members.filter(pm => pm.project_id !== id);
   db.environments = db.environments.filter(e => e.project_id !== id);
   db.encrypted_secrets = db.encrypted_secrets.filter(s => s.project_id !== id);
   db.branches = db.branches.filter(b => b.project_id !== id);
@@ -768,23 +975,35 @@ export async function deleteProject(id: string, actorId?: string): Promise<void>
   db.integration_connections = db.integration_connections.filter(i => i.project_id !== id);
   saveLocalDb(db);
 
-  if (actorId && target) {
+  if (actorId) {
     await logAuditEvent({
       actor_id: actorId,
       action: 'project.deleted',
       resource_type: 'project',
       resource_id: id,
-      workspace_id: target.workspace_id,
+      workspace_id: target?.workspace_id,
       outcome: 'success',
-      metadata: { name: target.name },
+      metadata: { name: target?.name || id },
     });
   }
 
   if (isSupabaseConfigured) {
     try {
+      if (target?.workspace_id && (actorId || target.owner_id)) {
+        await supabase.from('workspace_members').upsert(
+          {
+            workspace_id: target.workspace_id,
+            user_id: actorId || target.owner_id,
+            role: 'owner',
+          },
+          { onConflict: 'workspace_id,user_id' }
+        );
+      }
+      // Try SECURITY DEFINER RPC first, then standard table DELETE
+      await supabase.rpc('delete_project_safe', { p_project_id: id });
       await supabase.from('projects').delete().eq('id', id);
     } catch {
-      // Handled locally
+      // Handled locally via tombstone + localDb removal
     }
   }
 }
@@ -793,7 +1012,9 @@ export async function deleteProject(id: string, actorId?: string): Promise<void>
 
 export async function getEnvironments(projectId: string): Promise<Environment[]> {
   const db = loadLocalDb();
-  let localEnvs = db.environments.filter(e => e.project_id === projectId);
+  let localEnvs = db.environments.filter(
+    e => e.project_id === projectId && !isIdDeleted(db, e.id)
+  );
 
   // If a project exists without environments, auto-provision the 4 standard environments
   if (localEnvs.length === 0 && projectId) {
@@ -826,7 +1047,35 @@ export async function getEnvironments(projectId: string): Promise<Environment[]>
         .eq('project_id', projectId)
         .order('type');
       if (!error && data && data.length > 0) {
-        return data as Environment[];
+        const remote = (data as Environment[]).filter(e => !isIdDeleted(db, e.id));
+        // Sync remote environment IDs into localDb (remapping any local secrets attached to provisional env IDs)
+        for (const renv of remote) {
+          const localMatchIdx = db.environments.findIndex(
+            le => le.project_id === projectId && le.name.toLowerCase() === renv.name.toLowerCase()
+          );
+          if (localMatchIdx >= 0) {
+            const oldId = db.environments[localMatchIdx].id;
+            if (oldId !== renv.id) {
+              for (const sec of db.encrypted_secrets) {
+                if (sec.environment_id === oldId) {
+                  sec.environment_id = renv.id;
+                }
+              }
+            }
+            db.environments[localMatchIdx] = renv;
+          } else {
+            db.environments.push(renv);
+          }
+        }
+        saveLocalDb(db);
+        const remoteNames = new Set(remote.map(r => r.name.toLowerCase()));
+        const extras = db.environments.filter(
+          le =>
+            le.project_id === projectId &&
+            !isIdDeleted(db, le.id) &&
+            !remoteNames.has(le.name.toLowerCase())
+        );
+        return [...remote, ...extras];
       }
     } catch {
       // Return localEnvs
@@ -865,7 +1114,15 @@ export async function createEnvironment(
         .insert({ project_id: projectId, name: env.name, type, description })
         .select()
         .single();
-      if (!error && data) return data as Environment;
+      if (!error && data) {
+        const remoteEnv = data as Environment;
+        const idx = db.environments.findIndex(e => e.id === env.id);
+        if (idx >= 0) {
+          db.environments[idx] = remoteEnv;
+          saveLocalDb(db);
+        }
+        return remoteEnv;
+      }
     } catch {
       // Use local env
     }
@@ -878,9 +1135,15 @@ export async function createEnvironment(
 
 export async function getSecrets(environmentId: string): Promise<EncryptedSecret[]> {
   const db = loadLocalDb();
-  const localSecrets = db.encrypted_secrets
-    .filter(s => s.environment_id === environmentId)
-    .sort((a, b) => a.variable_name.localeCompare(b.variable_name));
+  const filterSecrets = (list: EncryptedSecret[]) =>
+    list
+      .filter(
+        s =>
+          s.environment_id === environmentId &&
+          !isIdDeleted(db, s.id) &&
+          !isIdDeleted(db, `secret:${environmentId}:${s.variable_name}`)
+      )
+      .sort((a, b) => a.variable_name.localeCompare(b.variable_name));
 
   if (isSupabaseConfigured) {
     try {
@@ -890,21 +1153,54 @@ export async function getSecrets(environmentId: string): Promise<EncryptedSecret
         .eq('environment_id', environmentId)
         .order('variable_name');
       if (!error && data && data.length > 0) {
-        return data as EncryptedSecret[];
+        const remote = (data as EncryptedSecret[]).filter(
+          s =>
+            !isIdDeleted(db, s.id) &&
+            !isIdDeleted(db, `secret:${environmentId}:${s.variable_name}`)
+        );
+        const merged: EncryptedSecret[] = [];
+        for (const rs of remote) {
+          const localIdx = db.encrypted_secrets.findIndex(
+            ls =>
+              ls.id === rs.id ||
+              (ls.environment_id === environmentId && ls.variable_name === rs.variable_name)
+          );
+          if (localIdx >= 0) {
+            const localSec = db.encrypted_secrets[localIdx];
+            const chosen = localSec.updated_at > rs.updated_at ? localSec : rs;
+            db.encrypted_secrets[localIdx] = chosen;
+            merged.push(chosen);
+          } else {
+            db.encrypted_secrets.push(rs);
+            merged.push(rs);
+          }
+        }
+        saveLocalDb(db);
+        const remoteNames = new Set(merged.map(s => s.variable_name));
+        const localExtras = filterSecrets(db.encrypted_secrets).filter(
+          ls => !remoteNames.has(ls.variable_name)
+        );
+        return [...merged, ...localExtras].sort((a, b) =>
+          a.variable_name.localeCompare(b.variable_name)
+        );
       }
     } catch {
       // Return localSecrets
     }
   }
 
-  return localSecrets;
+  return filterSecrets(db.encrypted_secrets);
 }
 
 export async function getProjectSecretCounts(projectId: string): Promise<Record<string, number>> {
   const db = loadLocalDb();
   const counts: Record<string, number> = {};
   for (const s of db.encrypted_secrets) {
-    if (s.project_id === projectId) {
+    if (
+      s.project_id === projectId &&
+      !isIdDeleted(db, s.id) &&
+      !isIdDeleted(db, `secret:${s.environment_id}:${s.variable_name}`)
+    ) {
       counts[s.environment_id] = (counts[s.environment_id] || 0) + 1;
     }
   }
@@ -923,6 +1219,9 @@ export async function createSecret(
   const now = new Date().toISOString();
   const cleanName = variableName.trim();
   const db = loadLocalDb();
+
+  // Clear any previous tombstone for this variable name in this environment
+  db.deleted_ids = db.deleted_ids.filter(id => id !== `secret:${environmentId}:${cleanName}`);
 
   // Upsert if variable_name already exists in this environment
   const existingIdx = db.encrypted_secrets.findIndex(
@@ -988,7 +1287,15 @@ export async function createSecret(
         )
         .select()
         .single();
-      if (!error && data) return data as EncryptedSecret;
+      if (!error && data) {
+        const remoteSecret = data as EncryptedSecret;
+        const idx = db.encrypted_secrets.findIndex(s => s.id === secretRecord.id);
+        if (idx >= 0) {
+          db.encrypted_secrets[idx] = remoteSecret;
+          saveLocalDb(db);
+        }
+        return remoteSecret;
+      }
     } catch {
       // Use local secretRecord
     }
@@ -1000,6 +1307,10 @@ export async function createSecret(
 export async function deleteSecret(id: string, actorId?: string): Promise<void> {
   const db = loadLocalDb();
   const target = db.encrypted_secrets.find(s => s.id === id);
+  markIdDeleted(db, id);
+  if (target) {
+    markIdDeleted(db, `secret:${target.environment_id}:${target.variable_name}`);
+  }
   db.encrypted_secrets = db.encrypted_secrets.filter(s => s.id !== id);
   saveLocalDb(db);
 
@@ -1030,9 +1341,15 @@ export async function deleteSecret(id: string, actorId?: string): Promise<void> 
 
 export async function getBranches(projectId: string): Promise<Branch[]> {
   const db = loadLocalDb();
-  const localBranches = db.branches
-    .filter(b => b.project_id === projectId)
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const filterBranches = (list: Branch[]) =>
+    list
+      .filter(
+        b =>
+          b.project_id === projectId &&
+          !isIdDeleted(db, b.id) &&
+          !isIdDeleted(db, `branch:${projectId}:${b.name}`)
+      )
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
   if (isSupabaseConfigured) {
     try {
@@ -1042,14 +1359,37 @@ export async function getBranches(projectId: string): Promise<Branch[]> {
         .eq('project_id', projectId)
         .order('updated_at', { ascending: false });
       if (!error && data && data.length > 0) {
-        return data as Branch[];
+        const remote = (data as Branch[]).filter(
+          b => !isIdDeleted(db, b.id) && !isIdDeleted(db, `branch:${projectId}:${b.name}`)
+        );
+        const merged: Branch[] = [];
+        for (const rb of remote) {
+          const localIdx = db.branches.findIndex(
+            lb => lb.id === rb.id || (lb.project_id === projectId && lb.name === rb.name)
+          );
+          if (localIdx >= 0) {
+            const localBr = db.branches[localIdx];
+            const chosen = localBr.updated_at > rb.updated_at ? localBr : rb;
+            db.branches[localIdx] = chosen;
+            merged.push(chosen);
+          } else {
+            db.branches.push(rb);
+            merged.push(rb);
+          }
+        }
+        saveLocalDb(db);
+        const remoteNames = new Set(merged.map(b => b.name));
+        const localExtras = filterBranches(db.branches).filter(lb => !remoteNames.has(lb.name));
+        return [...merged, ...localExtras].sort((a, b) =>
+          b.updated_at.localeCompare(a.updated_at)
+        );
       }
     } catch {
       // Return localBranches
     }
   }
 
-  return localBranches;
+  return filterBranches(db.branches);
 }
 
 export async function createBranch(
@@ -1081,6 +1421,7 @@ export async function createBranch(
   };
 
   const db = loadLocalDb();
+  db.deleted_ids = db.deleted_ids.filter(id => id !== `branch:${projectId}:${cleanName}`);
   db.branches.unshift(branch);
   saveLocalDb(db);
 
@@ -1102,19 +1443,30 @@ export async function createBranch(
     try {
       const { data, error } = await supabase
         .from('branches')
-        .insert({
-          project_id: projectId,
-          name: cleanName,
-          repository_ref: branch.repository_ref,
-          commit_sha: branch.commit_sha,
-          commit_message: branch.commit_message,
-          commit_date: now,
-          is_active: true,
-          is_synced: true,
-        })
+        .upsert(
+          {
+            project_id: projectId,
+            name: cleanName,
+            repository_ref: branch.repository_ref,
+            commit_sha: branch.commit_sha,
+            commit_message: branch.commit_message,
+            commit_date: now,
+            is_active: true,
+            is_synced: true,
+          },
+          { onConflict: 'project_id,name' }
+        )
         .select()
         .single();
-      if (!error && data) return data as Branch;
+      if (!error && data) {
+        const remoteBranch = data as Branch;
+        const idx = db.branches.findIndex(b => b.id === branch.id);
+        if (idx >= 0) {
+          db.branches[idx] = remoteBranch;
+          saveLocalDb(db);
+        }
+        return remoteBranch;
+      }
     } catch {
       // Return local branch
     }
@@ -1140,7 +1492,14 @@ export async function updateBranch(id: string, updates: Partial<Branch>): Promis
         .eq('id', id)
         .select()
         .single();
-      if (!error && data) return data as Branch;
+      if (!error && data) {
+        const remoteBranch = data as Branch;
+        if (idx >= 0) {
+          db.branches[idx] = remoteBranch;
+          saveLocalDb(db);
+        }
+        return remoteBranch;
+      }
     } catch {
       // Use local branch
     }
@@ -1153,6 +1512,10 @@ export async function updateBranch(id: string, updates: Partial<Branch>): Promis
 export async function deleteBranch(id: string, actorId?: string): Promise<void> {
   const db = loadLocalDb();
   const target = db.branches.find(b => b.id === id);
+  markIdDeleted(db, id);
+  if (target) {
+    markIdDeleted(db, `branch:${target.project_id}:${target.name}`);
+  }
   db.branches = db.branches.filter(b => b.id !== id);
   saveLocalDb(db);
 
@@ -1187,27 +1550,28 @@ export async function getTasks(
   workspaceId?: string
 ): Promise<Task[]> {
   const db = loadLocalDb();
-  let filtered = db.tasks;
-
-  if (projectId) {
-    filtered = filtered.filter(t => t.project_id === projectId);
-  } else if (workspaceId) {
-    const wsProjectIds = new Set(
-      db.projects.filter(p => p.workspace_id === workspaceId).map(p => p.id)
-    );
-    filtered = filtered.filter(t => wsProjectIds.has(t.project_id));
-  }
-
-  if (status) {
-    filtered = filtered.filter(t => t.status === status);
-  }
-
-  const localTasks: Task[] = filtered
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .map(t => ({
-      ...t,
-      assignee: t.assignee_id ? db.profiles.find(p => p.id === t.assignee_id) : undefined,
-    }));
+  const getFilteredLocal = () => {
+    let filtered = db.tasks.filter(t => !isIdDeleted(db, t.id));
+    if (projectId) {
+      filtered = filtered.filter(t => t.project_id === projectId);
+    } else if (workspaceId) {
+      const wsProjectIds = new Set(
+        db.projects
+          .filter(p => p.workspace_id === workspaceId && !isIdDeleted(db, p.id))
+          .map(p => p.id)
+      );
+      filtered = filtered.filter(t => wsProjectIds.has(t.project_id));
+    }
+    if (status) {
+      filtered = filtered.filter(t => t.status === status);
+    }
+    return filtered
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map(t => ({
+        ...t,
+        assignee: t.assignee_id ? db.profiles.find(p => p.id === t.assignee_id) : undefined,
+      }));
+  };
 
   if (isSupabaseConfigured && projectId) {
     try {
@@ -1224,14 +1588,31 @@ export async function getTasks(
 
       const { data, error } = await query;
       if (!error && data && data.length > 0) {
-        return data as Task[];
+        const remote = (data as Task[]).filter(t => !isIdDeleted(db, t.id));
+        const merged: Task[] = [];
+        for (const rt of remote) {
+          const localIdx = db.tasks.findIndex(lt => lt.id === rt.id);
+          if (localIdx >= 0) {
+            const localTask = db.tasks[localIdx];
+            const chosen = localTask.updated_at > rt.updated_at ? localTask : rt;
+            db.tasks[localIdx] = chosen;
+            merged.push(chosen);
+          } else {
+            db.tasks.push(rt);
+            merged.push(rt);
+          }
+        }
+        saveLocalDb(db);
+        const remoteIds = new Set(merged.map(t => t.id));
+        const localExtras = getFilteredLocal().filter(lt => !remoteIds.has(lt.id));
+        return [...merged, ...localExtras];
       }
     } catch {
       // Return localTasks
     }
   }
 
-  return localTasks;
+  return getFilteredLocal();
 }
 
 export async function createTask(
@@ -1293,7 +1674,15 @@ export async function createTask(
         })
         .select()
         .single();
-      if (!error && data) return data as Task;
+      if (!error && data) {
+        const remoteTask = data as Task;
+        const idx = db.tasks.findIndex(t => t.id === task.id);
+        if (idx >= 0) {
+          db.tasks[idx] = remoteTask;
+          saveLocalDb(db);
+        }
+        return remoteTask;
+      }
     } catch {
       // Return local task
     }
@@ -1337,7 +1726,14 @@ export async function updateTask(
         .eq('id', id)
         .select()
         .single();
-      if (!error && data) return data as Task;
+      if (!error && data) {
+        const remoteTask = data as Task;
+        if (idx >= 0) {
+          db.tasks[idx] = remoteTask;
+          saveLocalDb(db);
+        }
+        return remoteTask;
+      }
     } catch {
       // Return local task
     }
@@ -1350,6 +1746,7 @@ export async function updateTask(
 export async function deleteTask(id: string, actorId?: string): Promise<void> {
   const db = loadLocalDb();
   const target = db.tasks.find(t => t.id === id);
+  markIdDeleted(db, id);
   db.tasks = db.tasks.filter(t => t.id !== id);
   saveLocalDb(db);
 
