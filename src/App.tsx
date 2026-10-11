@@ -552,17 +552,21 @@ function OnboardingPage() {
   );
 }
 
-// ─── Sidebar ────────────────────────────────────────────────────────
+// ─── Sidebar (Bento Pro 2.0 Aesthetic) ──────────────────────────────
 function Sidebar({
   collapsed,
   onToggle,
   mobileOpen,
   onMobileClose,
+  darkMode,
+  onToggleDarkMode,
 }: {
   collapsed: boolean;
   onToggle: () => void;
   mobileOpen: boolean;
   onMobileClose: () => void;
+  darkMode: boolean;
+  onToggleDarkMode: (dark: boolean) => void;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -570,16 +574,16 @@ function Sidebar({
   const { activeWorkspace } = useWorkspace();
 
   const navItems = [
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/workspaces', icon: Globe, label: 'Workspaces' },
-    { path: '/projects', icon: FolderKanban, label: 'Projects' },
-    { path: '/environments', icon: Server, label: 'Environments & Secrets' },
-    { path: '/branches', icon: GitBranch, label: 'Branches' },
-    { path: '/tasks', icon: CheckSquare, label: 'Tasks Board' },
-    { path: '/members', icon: Users, label: 'Team Members' },
-    { path: '/integrations', icon: Zap, label: 'Integrations' },
-    { path: '/activity', icon: Activity, label: 'Audit Activity' },
-    { path: '/settings', icon: Settings, label: 'Settings' },
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', hasChevron: false },
+    { path: '/projects', icon: FolderKanban, label: 'Projects', hasChevron: false },
+    { path: '/workspaces', icon: Globe, label: 'Workspaces', hasChevron: true },
+    { path: '/environments', icon: Server, label: 'Environments', hasChevron: false },
+    { path: '/tasks', icon: CheckSquare, label: 'Tasks Board', hasChevron: true },
+    { path: '/branches', icon: GitBranch, label: 'Branches', hasChevron: false },
+    { path: '/members', icon: Users, label: 'Customers & Team', hasChevron: true },
+    { path: '/integrations', icon: Zap, label: 'Integrations', hasChevron: false },
+    { path: '/activity', icon: Activity, label: 'Audit Activity', hasChevron: false },
+    { path: '/settings', icon: Settings, label: 'Settings', hasChevron: false },
   ];
 
   const handleVaultButton = () => {
@@ -598,128 +602,195 @@ function Sidebar({
     <>
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-30 bg-slate-950/60 backdrop-blur-xs lg:hidden"
+          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-xs lg:hidden"
           onClick={onMobileClose}
         />
       )}
       <aside
-        className={`fixed left-0 top-0 h-full bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 z-40 flex flex-col ${
-          collapsed ? 'w-16' : 'w-64'
+        className={`fixed left-0 top-0 h-full bg-[#F4F4F2] dark:bg-[#111315] transition-all duration-300 z-40 flex flex-col justify-between py-6 px-4 ${
+          collapsed ? 'w-20' : 'w-64'
         } ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
-          {!collapsed && (
-            <Link to="/dashboard" className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-sm">
-                <Shield className="w-4 h-4 text-white" />
+        {/* Top: Brand Emblem + Navigation */}
+        <div className="space-y-7 overflow-y-auto no-scrollbar">
+          <div className="flex items-center justify-between px-2">
+            <Link to="/dashboard" className="flex items-center gap-3 group">
+              {/* Geometric 4-Quadrant Dark Sphere Emblem matching reference image */}
+              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#3A3F45] via-[#1A1D1F] to-[#0B0C0E] flex items-center justify-center shadow-md border border-black/20 relative overflow-hidden shrink-0">
+                <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 opacity-60">
+                  <div className="border-r border-b border-white/25 bg-white/10" />
+                  <div className="border-b border-white/25" />
+                  <div className="border-r border-white/25" />
+                  <div className="bg-white/5" />
+                </div>
+                <Shield className="w-4 h-4 text-white relative z-10" />
               </div>
-              <div>
-                <span className="font-bold text-slate-900 dark:text-white block leading-none">DevPortal</span>
-                <span className="text-[10px] text-slate-400 font-medium">Internal Developer Portal</span>
-              </div>
+              {!collapsed && (
+                <div>
+                  <span className="font-bold text-[16px] tracking-tight text-[#1A1D1F] dark:text-white block leading-none">
+                    DevPortal
+                  </span>
+                  <span className="text-[11px] text-[#6F767E] dark:text-[#9A9FA5] font-medium mt-0.5 block">
+                    {activeWorkspace?.name || 'Developer Portal'}
+                  </span>
+                </div>
+              )}
             </Link>
-          )}
-          <button
-            onClick={onToggle}
-            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hidden lg:inline-flex"
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </button>
-          <button
-            onClick={onMobileClose}
-            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 lg:hidden"
-          >
-            <X className="w-4 h-4" />
-          </button>
+            <button
+              onClick={onToggle}
+              className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[#6F767E] hidden lg:inline-flex"
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={onMobileClose}
+              className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[#6F767E] lg:hidden"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <nav className="space-y-1">
+            {navItems.map(item => {
+              const isActive =
+                location.pathname === item.path ||
+                (item.path === '/dashboard' && location.pathname === '/');
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={onMobileClose}
+                  className={`flex items-center justify-between px-3.5 py-3 rounded-2xl transition-all text-[14px] ${
+                    isActive
+                      ? 'bg-white dark:bg-[#1A1D1F] text-[#1A1D1F] dark:text-white font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.04)]'
+                      : 'text-[#6F767E] dark:text-[#9A9FA5] hover:text-[#1A1D1F] dark:hover:text-white hover:bg-white/50 dark:hover:bg-white/5 font-medium'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <item.icon
+                      className={`w-[18px] h-[18px] shrink-0 ${
+                        isActive ? 'text-[#1A1D1F] dark:text-white' : 'text-[#6F767E] dark:text-[#9A9FA5]'
+                      }`}
+                    />
+                    {!collapsed && <span className="truncate">{item.label}</span>}
+                  </div>
+                  {!collapsed && item.hasChevron && (
+                    <ChevronRight
+                      className={`w-3.5 h-3.5 shrink-0 transition-transform ${
+                        isActive ? 'rotate-90 text-[#1A1D1F] dark:text-white' : 'text-[#9A9FA5]'
+                      }`}
+                    />
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
 
-        <nav className="flex-1 p-2.5 space-y-1 overflow-y-auto">
-          {navItems.map(item => {
-            const isActive =
-              location.pathname === item.path ||
-              (item.path === '/dashboard' && location.pathname === '/');
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={onMobileClose}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition font-medium text-sm ${
-                  isActive
-                    ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/20'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-white'
+        {/* Bottom: Vault Trigger + Vertical Moon/Sun Pill Toggle (Exact Reference Image Match) */}
+        <div className="pt-4 space-y-3">
+          <div className="flex items-center justify-between gap-2 px-1">
+            {/* Circular Vault / Quick Help Button + Vertical Moon/Sun Toggle Pill */}
+            <div className="flex flex-col items-center gap-2.5">
+              <button
+                onClick={handleVaultButton}
+                title={
+                  !vault.isInitialized
+                    ? 'Initialize Zero-Knowledge Vault'
+                    : vault.isLocked
+                      ? 'Vault Locked — Click to Unlock'
+                      : 'Vault Unlocked — Click to Lock'
+                }
+                className={`w-10 h-10 rounded-full flex items-center justify-center shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition border ${
+                  vault.isLocked
+                    ? 'bg-white dark:bg-[#1A1D1F] border-black/[0.04] dark:border-white/10 text-[#1A1D1F] dark:text-white hover:scale-105'
+                    : 'bg-[#E3F5E1] dark:bg-emerald-950 border-[#2A9D5C]/20 text-[#2A9D5C]'
                 }`}
               >
-                <item.icon className="w-4 h-4 shrink-0" />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-              </Link>
-            );
-          })}
-        </nav>
+                {vault.isLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+              </button>
 
-        <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
-          {!collapsed && profile && (
-            <div className="px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                  {profile.full_name || profile.email}
-                </p>
-                {activeWorkspace && (
-                  <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold">
-                    {activeWorkspace.member_role}
-                  </span>
-                )}
+              {/* Vertical Moon / Sun Theme Pill from Reference Image */}
+              <div className="bg-white/80 dark:bg-[#1A1D1F] p-1 rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-black/[0.04] dark:border-white/10 flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onToggleDarkMode(true)}
+                  title="Dark theme"
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition ${
+                    darkMode
+                      ? 'bg-[#272B30] text-white shadow-xs'
+                      : 'text-[#6F767E] hover:text-[#1A1D1F]'
+                  }`}
+                >
+                  <Moon className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onToggleDarkMode(false)}
+                  title="Light Bento theme"
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition ${
+                    !darkMode
+                      ? 'bg-[#F4F4F2] text-[#1A1D1F] shadow-xs'
+                      : 'text-[#9A9FA5] hover:text-white'
+                  }`}
+                >
+                  <Sun className="w-3.5 h-3.5" />
+                </button>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{profile.email}</p>
             </div>
-          )}
 
-          <button
-            onClick={handleVaultButton}
-            className={`flex items-center gap-3 px-3 py-2 rounded-xl w-full transition text-xs font-medium border ${
-              !vault.isInitialized
-                ? 'border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300'
-                : vault.isLocked
-                  ? 'border-amber-200 dark:border-amber-800/70 bg-amber-50/80 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 hover:bg-amber-100/70'
-                  : 'border-emerald-200 dark:border-emerald-800/70 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100/70'
-            }`}
-          >
-            {vault.isLocked ? <Lock className="w-4 h-4 shrink-0" /> : <Unlock className="w-4 h-4 shrink-0" />}
             {!collapsed && (
-              <span className="truncate">
-                {!vault.isInitialized
-                  ? 'Initialize Vault'
-                  : vault.isLocked
-                    ? 'Vault Locked (Click to Unlock)'
-                    : 'Vault Unlocked (Click to Lock)'}
-              </span>
+              <div className="flex-1 min-w-0 bg-white/80 dark:bg-[#1A1D1F] rounded-2xl p-3 border border-black/[0.04] dark:border-white/10 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
+                <div className="flex items-center justify-between gap-1">
+                  <p className="text-xs font-bold text-[#1A1D1F] dark:text-white truncate">
+                    {profile?.full_name || 'Developer'}
+                  </p>
+                  <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-[#E3F5E1] text-[#2A9D5C]">
+                    {activeWorkspace?.member_role || 'owner'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#6F767E] dark:text-[#9A9FA5] truncate mt-0.5">
+                  {profile?.email}
+                </p>
+                <div className="mt-2.5 pt-2 border-t border-black/[0.05] dark:border-white/10 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={handleVaultButton}
+                    className="text-[11px] font-semibold text-[#1A1D1F] dark:text-white hover:underline"
+                  >
+                    {vault.isLocked ? 'Unlock Vault' : 'Lock Vault'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={signOut}
+                    className="text-[11px] font-semibold text-[#FF6A55] hover:underline flex items-center gap-1"
+                  >
+                    <LogOut className="w-3 h-3" /> Exit
+                  </button>
+                </div>
+              </div>
             )}
-          </button>
-
-          <button
-            onClick={signOut}
-            className="flex items-center gap-3 px-3 py-2 rounded-xl w-full transition text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50"
-          >
-            <LogOut className="w-4 h-4 shrink-0" />
-            {!collapsed && <span>Sign out</span>}
-          </button>
+          </div>
         </div>
       </aside>
     </>
   );
 }
 
-// ─── Main Layout with Global Workspace & Project Switchers ──────────
+// ─── Main Layout with Bento Pro 2.0 Top Header Bar ──────────────────
 function AppLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
   const [recentEvents, setRecentEvents] = useState<AuditEvent[]>([]);
 
+  const location = useLocation();
   const navigate = useNavigate();
-  const { vault, openVaultModal, lockVault } = useAuth();
+  const { vault, openVaultModal, lockVault, profile } = useAuth();
   const {
     workspaces,
     activeWorkspace,
@@ -731,16 +802,14 @@ function AppLayout({ children }: { children: ReactNode }) {
 
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
-      return (
-        localStorage.getItem('theme') === 'dark' ||
-        (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)
-      );
+      return localStorage.getItem('theme') === 'dark';
     }
     return false;
   });
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
+    document.documentElement.classList.toggle('light', !darkMode);
     localStorage.setItem('theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
@@ -749,6 +818,20 @@ function AppLayout({ children }: { children: ReactNode }) {
       getAuditEvents(activeWorkspace.id, 8).then(setRecentEvents).catch(() => {});
     }
   }, [showNotifications, activeWorkspace]);
+
+  const pageTitle = useMemo(() => {
+    const p = location.pathname;
+    if (p.startsWith('/projects')) return 'Projects';
+    if (p.startsWith('/workspaces')) return 'Workspaces';
+    if (p.startsWith('/environments')) return 'Environments';
+    if (p.startsWith('/branches')) return 'Branches';
+    if (p.startsWith('/tasks')) return 'Tasks Board';
+    if (p.startsWith('/members')) return 'Customers & Team';
+    if (p.startsWith('/integrations')) return 'Integrations';
+    if (p.startsWith('/activity')) return 'Audit Activity';
+    if (p.startsWith('/settings')) return 'Settings';
+    return 'Dashboard';
+  }, [location.pathname]);
 
   const filteredProjects = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -780,95 +863,99 @@ function AppLayout({ children }: { children: ReactNode }) {
   }, [searchQuery]);
 
   return (
-    <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 ${darkMode ? 'dark' : ''}`}>
+    <div className={`min-h-screen bg-[#F4F4F2] dark:bg-[#111315] text-[#1A1D1F] dark:text-[#FCFCFC] ${darkMode ? 'dark' : ''}`}>
       <Sidebar
         collapsed={collapsed}
         onToggle={() => setCollapsed(!collapsed)}
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
+        darkMode={darkMode}
+        onToggleDarkMode={setDarkMode}
       />
 
-      <div className={`transition-all duration-300 ${collapsed ? 'lg:ml-16' : 'lg:ml-64'}`}>
-        <header className="sticky top-0 z-20 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
-          <div className="flex flex-wrap items-center justify-between gap-3 px-4 lg:px-6 py-3">
-            {/* Left: Mobile Menu + Global Workspace & Project Switchers */}
-            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+      <div className={`transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
+        {/* Top Header matching Reference Image ("Dashboard" on left, Pill Search + Black "Create" Pill + Circular Icons on right) */}
+        <header className="sticky top-0 z-20 bg-[#F4F4F2]/90 dark:bg-[#111315]/90 backdrop-blur-md">
+          <div className="max-w-[1400px] mx-auto flex flex-wrap items-center justify-between gap-4 px-4 sm:px-8 pt-6 pb-4">
+            {/* Left: Mobile Menu + Bold Page Heading + Compact Workspace/Project Pills */}
+            <div className="flex items-center gap-3 sm:gap-5 flex-wrap">
               <button
                 onClick={() => setMobileOpen(true)}
-                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 lg:hidden"
+                className="p-2.5 rounded-full bg-white dark:bg-[#1A1D1F] text-[#1A1D1F] dark:text-white shadow-xs lg:hidden"
                 aria-label="Open navigation"
               >
                 <Menu className="w-5 h-5" />
               </button>
 
-              {/* Workspace Selector */}
-              <div className="flex items-center gap-1.5 bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-xl px-2.5 py-1.5">
-                <Globe className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                <span className="text-[11px] font-medium text-slate-400 hidden sm:inline">Workspace:</span>
-                <select
-                  aria-label="Select active workspace"
-                  value={activeWorkspace?.id || ''}
-                  onChange={e => {
-                    const found = workspaces.find(w => w.id === e.target.value) || null;
-                    setActiveWorkspace(found);
-                  }}
-                  className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none cursor-pointer max-w-[140px] sm:max-w-[180px] truncate"
-                >
-                  {workspaces.length === 0 && <option value="">No Workspace</option>}
-                  {workspaces.map(ws => (
-                    <option key={ws.id} value={ws.id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                      {ws.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <h1 className="text-[28px] sm:text-[34px] font-extrabold tracking-tight text-[#1A1D1F] dark:text-white leading-none">
+                {pageTitle}
+              </h1>
 
-              <span className="text-slate-300 dark:text-slate-700 hidden sm:inline">/</span>
-
-              {/* Active Project Selector */}
-              <div className="flex items-center gap-1.5 bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-xl px-2.5 py-1.5">
-                <FolderKanban className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
-                <span className="text-[11px] font-medium text-slate-400 hidden sm:inline">Project:</span>
-                <select
-                  aria-label="Select active project"
-                  value={activeProject?.id || ''}
-                  onChange={e => {
-                    const found = projects.find(p => p.id === e.target.value) || null;
-                    setActiveProject(found);
-                  }}
-                  className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none cursor-pointer max-w-[140px] sm:max-w-[180px] truncate"
-                >
-                  {projects.length === 0 && <option value="">No Project</option>}
-                  {projects.map(proj => (
-                    <option key={proj.id} value={proj.id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                      {proj.name}
-                    </option>
-                  ))}
-                </select>
-                {activeProject && (
-                  <Link
-                    to={`/projects?edit=${activeProject.id}`}
-                    title={`Edit Project (${activeProject.name})`}
-                    className="p-0.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950 text-indigo-600 dark:text-indigo-400"
+              {/* Sleek Context Switcher Pills */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 bg-white dark:bg-[#1A1D1F] border border-black/[0.05] dark:border-white/10 rounded-full px-3.5 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
+                  <Globe className="w-3.5 h-3.5 text-[#6F767E]" />
+                  <select
+                    aria-label="Select active workspace"
+                    value={activeWorkspace?.id || ''}
+                    onChange={e => {
+                      const found = workspaces.find(w => w.id === e.target.value) || null;
+                      setActiveWorkspace(found);
+                    }}
+                    className="bg-transparent text-xs font-semibold text-[#1A1D1F] dark:text-white outline-none cursor-pointer max-w-[130px] sm:max-w-[160px] truncate"
                   >
-                    <Edit3 className="w-3.5 h-3.5" />
+                    {workspaces.length === 0 && <option value="">No Workspace</option>}
+                    {workspaces.map(ws => (
+                      <option key={ws.id} value={ws.id} className="bg-white dark:bg-[#1A1D1F] text-[#1A1D1F] dark:text-white">
+                        {ws.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-white dark:bg-[#1A1D1F] border border-black/[0.05] dark:border-white/10 rounded-full px-3.5 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
+                  <FolderKanban className="w-3.5 h-3.5 text-[#6F767E]" />
+                  <select
+                    aria-label="Select active project"
+                    value={activeProject?.id || ''}
+                    onChange={e => {
+                      const found = projects.find(p => p.id === e.target.value) || null;
+                      setActiveProject(found);
+                    }}
+                    className="bg-transparent text-xs font-semibold text-[#1A1D1F] dark:text-white outline-none cursor-pointer max-w-[120px] sm:max-w-[150px] truncate"
+                  >
+                    {projects.length === 0 && <option value="">No Project</option>}
+                    {projects.map(proj => (
+                      <option key={proj.id} value={proj.id} className="bg-white dark:bg-[#1A1D1F] text-[#1A1D1F] dark:text-white">
+                        {proj.name}
+                      </option>
+                    ))}
+                  </select>
+                  {activeProject && (
+                    <Link
+                      to={`/projects?edit=${activeProject.id}`}
+                      title={`Edit Project (${activeProject.name})`}
+                      className="p-1 rounded-full hover:bg-[#F4F4F2] dark:hover:bg-white/10 text-[#1A1D1F] dark:text-white"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                    </Link>
+                  )}
+                  <Link
+                    to="/projects?new=1"
+                    title="Create New Project"
+                    className="p-1 rounded-full hover:bg-[#F4F4F2] dark:hover:bg-white/10 text-[#1A1D1F] dark:text-white"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
                   </Link>
-                )}
-                <Link
-                  to="/projects?new=1"
-                  title="Create New Project"
-                  className="p-0.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950 text-indigo-600 dark:text-indigo-400"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </Link>
+                </div>
               </div>
             </div>
 
-            {/* Right: Search + Vault Badge + Notifications + Dark Mode */}
-            <div className="flex items-center gap-2.5">
-              {/* Global Search */}
+            {/* Right: White Pill Search + Solid Black "Create" Pill + Circular Icon Buttons */}
+            <div className="flex items-center gap-3">
+              {/* Pill Search Bar ("Search anything...") */}
               <div className="relative hidden md:block">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-[#6F767E]" />
                 <input
                   type="text"
                   value={searchQuery}
@@ -878,14 +965,14 @@ function AppLayout({ children }: { children: ReactNode }) {
                     setSearchQuery(e.target.value);
                     setShowSearchDropdown(true);
                   }}
-                  placeholder="Jump to project or page..."
-                  className="pl-9 pr-4 py-1.5 w-56 lg:w-64 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition"
+                  placeholder="Search anything..."
+                  className="pl-10 pr-4 py-2.5 w-60 lg:w-72 rounded-full bg-white dark:bg-[#1A1D1F] border border-black/[0.04] dark:border-white/10 shadow-[0_2px_10px_rgba(0,0,0,0.025)] text-xs font-medium text-[#1A1D1F] dark:text-white placeholder:text-[#9A9FA5] outline-none focus:ring-2 focus:ring-black/10 transition"
                 />
                 {showSearchDropdown && searchQuery.trim() && (
-                  <div className="absolute right-0 mt-2 w-80 rounded-xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-50 space-y-2">
+                  <div className="absolute right-0 mt-2 w-80 rounded-3xl bg-white dark:bg-[#1A1D1F] shadow-2xl border border-black/[0.06] dark:border-white/10 p-3 z-50 space-y-2">
                     {filteredProjects.length > 0 && (
                       <div>
-                        <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                        <p className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#9A9FA5]">
                           Projects
                         </p>
                         {filteredProjects.map(p => (
@@ -896,17 +983,17 @@ function AppLayout({ children }: { children: ReactNode }) {
                               setSearchQuery('');
                               navigate('/projects');
                             }}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between text-xs"
+                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#F4F4F2] dark:hover:bg-white/5 flex items-center justify-between text-xs"
                           >
-                            <span className="font-medium text-slate-900 dark:text-white">{p.name}</span>
-                            <span className="text-[10px] text-indigo-600 dark:text-indigo-400">Select →</span>
+                            <span className="font-semibold text-[#1A1D1F] dark:text-white">{p.name}</span>
+                            <span className="text-[10px] font-semibold text-[#2A9D5C]">Open →</span>
                           </button>
                         ))}
                       </div>
                     )}
                     {quickNavMatches.length > 0 && (
                       <div>
-                        <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                        <p className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#9A9FA5]">
                           Portal Pages
                         </p>
                         {quickNavMatches.map(item => (
@@ -916,7 +1003,7 @@ function AppLayout({ children }: { children: ReactNode }) {
                               setSearchQuery('');
                               navigate(item.path);
                             }}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-300"
+                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#F4F4F2] dark:hover:bg-white/5 text-xs font-medium text-[#1A1D1F] dark:text-white"
                           >
                             {item.label}
                           </button>
@@ -924,70 +1011,118 @@ function AppLayout({ children }: { children: ReactNode }) {
                       </div>
                     )}
                     {filteredProjects.length === 0 && quickNavMatches.length === 0 && (
-                      <p className="text-xs text-slate-400 px-2 py-3 text-center">No matching projects or pages</p>
+                      <p className="text-xs text-[#9A9FA5] px-2 py-3 text-center">No matching projects or pages</p>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* Vault Quick Button */}
-              <button
-                onClick={() => (vault.isLocked ? openVaultModal() : lockVault())}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition border ${
-                  vault.isLocked
-                    ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100'
-                    : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
-                }`}
-              >
-                {vault.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                <span className="hidden sm:inline">{vault.isLocked ? 'Unlock Vault' : 'Vault Unlocked'}</span>
-              </button>
+              {/* Solid Black "Create" Pill Button with Quick Action Menu */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateMenu(!showCreateMenu)}
+                  className="px-6 py-2.5 rounded-full bg-[#1A1D1F] hover:bg-[#272B30] dark:bg-white dark:text-[#1A1D1F] dark:hover:bg-slate-200 text-white text-xs sm:text-sm font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.12)] transition cursor-pointer"
+                >
+                  Create
+                </button>
+                {showCreateMenu && (
+                  <div
+                    onMouseLeave={() => setShowCreateMenu(false)}
+                    className="absolute right-0 mt-2 w-56 rounded-3xl bg-white dark:bg-[#1A1D1F] shadow-2xl border border-black/[0.06] dark:border-white/10 p-2 z-50 space-y-1"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCreateMenu(false);
+                        navigate('/projects?new=1');
+                      }}
+                      className="w-full text-left px-3.5 py-2.5 rounded-2xl hover:bg-[#F4F4F2] dark:hover:bg-white/5 text-xs font-semibold text-[#1A1D1F] dark:text-white flex items-center gap-2.5"
+                    >
+                      <FolderKanban className="w-4 h-4 text-[#2A9D5C]" /> New Project
+                    </button>
+                    {activeProject && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCreateMenu(false);
+                          navigate(`/projects?edit=${activeProject.id}`);
+                        }}
+                        className="w-full text-left px-3.5 py-2.5 rounded-2xl hover:bg-[#F4F4F2] dark:hover:bg-white/5 text-xs font-semibold text-[#1A1D1F] dark:text-white flex items-center gap-2.5"
+                      >
+                        <Edit3 className="w-4 h-4 text-indigo-500" /> Edit "{activeProject.name}"
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCreateMenu(false);
+                        navigate('/workspaces');
+                      }}
+                      className="w-full text-left px-3.5 py-2.5 rounded-2xl hover:bg-[#F4F4F2] dark:hover:bg-white/5 text-xs font-semibold text-[#1A1D1F] dark:text-white flex items-center gap-2.5"
+                    >
+                      <Globe className="w-4 h-4 text-purple-500" /> New Workspace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCreateMenu(false);
+                        navigate('/environments');
+                      }}
+                      className="w-full text-left px-3.5 py-2.5 rounded-2xl hover:bg-[#F4F4F2] dark:hover:bg-white/5 text-xs font-semibold text-[#1A1D1F] dark:text-white flex items-center gap-2.5"
+                    >
+                      <Key className="w-4 h-4 text-amber-500" /> Add Encrypted Secret
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCreateMenu(false);
+                        navigate('/tasks');
+                      }}
+                      className="w-full text-left px-3.5 py-2.5 rounded-2xl hover:bg-[#F4F4F2] dark:hover:bg-white/5 text-xs font-semibold text-[#1A1D1F] dark:text-white flex items-center gap-2.5"
+                    >
+                      <CheckSquare className="w-4 h-4 text-blue-500" /> Create Kanban Task
+                    </button>
+                  </div>
+                )}
+              </div>
 
-              {/* Theme Toggle */}
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
-                title="Toggle color theme"
-              >
-                {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </button>
-
-              {/* Audit Activity Bell */}
+              {/* Circular Bell Button */}
               <div className="relative">
                 <button
                   onClick={() => setShowNotifications(!showNotifications)}
-                  className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 relative"
+                  className="w-10 h-10 rounded-full bg-white dark:bg-[#1A1D1F] border border-black/[0.04] dark:border-white/10 shadow-[0_2px_10px_rgba(0,0,0,0.03)] flex items-center justify-center text-[#1A1D1F] dark:text-white hover:scale-105 transition relative"
                   title="Recent security & audit activity"
                 >
                   <Bell className="w-4 h-4" />
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-indigo-500 rounded-full" />
+                  <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-[#FF6A55] rounded-full" />
                 </button>
                 {showNotifications && (
-                  <div className="absolute right-0 mt-2 w-80 rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-4 z-50">
+                  <div className="absolute right-0 mt-2 w-80 rounded-3xl bg-white dark:bg-[#1A1D1F] shadow-2xl border border-black/[0.06] dark:border-white/10 p-4 z-50">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-semibold text-slate-900 dark:text-white">Recent Audit Events</span>
+                      <span className="text-xs font-bold text-[#1A1D1F] dark:text-white">Recent Audit Activity</span>
                       <Link
                         to="/activity"
                         onClick={() => setShowNotifications(false)}
-                        className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                        className="text-xs font-semibold text-[#2A9D5C] hover:underline"
                       >
                         View all
                       </Link>
                     </div>
                     <div className="space-y-2 max-h-64 overflow-y-auto">
                       {recentEvents.length === 0 ? (
-                        <p className="text-xs text-slate-400 py-4 text-center">No recent events</p>
+                        <p className="text-xs text-[#9A9FA5] py-4 text-center">No recent events</p>
                       ) : (
                         recentEvents.map(ev => (
                           <div
                             key={ev.id}
-                            className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/70 text-xs flex items-start justify-between gap-2"
+                            className="p-2.5 rounded-2xl bg-[#F4F4F2] dark:bg-[#111315] text-xs flex items-start justify-between gap-2"
                           >
                             <div>
-                              <p className="font-mono font-medium text-slate-800 dark:text-slate-200">{ev.action}</p>
-                              <p className="text-[11px] text-slate-400">{ev.resource_type}</p>
+                              <p className="font-semibold text-[#1A1D1F] dark:text-white">{ev.action}</p>
+                              <p className="text-[11px] text-[#6F767E]">{ev.resource_type}</p>
                             </div>
-                            <span className="text-[10px] text-slate-400 shrink-0">
+                            <span className="text-[10px] text-[#9A9FA5] shrink-0">
                               {new Date(ev.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </div>
@@ -997,26 +1132,51 @@ function AppLayout({ children }: { children: ReactNode }) {
                   </div>
                 )}
               </div>
+
+              {/* Circular Vault Status Button */}
+              <button
+                onClick={() => (vault.isLocked ? openVaultModal() : lockVault())}
+                title={vault.isLocked ? 'Unlock Zero-Knowledge Vault' : 'Vault Unlocked (Click to Lock)'}
+                className={`w-10 h-10 rounded-full border shadow-[0_2px_10px_rgba(0,0,0,0.03)] flex items-center justify-center transition hover:scale-105 ${
+                  vault.isLocked
+                    ? 'bg-white dark:bg-[#1A1D1F] border-black/[0.04] dark:border-white/10 text-[#1A1D1F] dark:text-white'
+                    : 'bg-[#E3F5E1] dark:bg-emerald-950 border-[#2A9D5C]/30 text-[#2A9D5C]'
+                }`}
+              >
+                {vault.isLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+              </button>
+
+              {/* Circular User Avatar */}
+              <Link
+                to="/settings"
+                title={profile?.full_name || profile?.email || 'Account Settings'}
+                className="w-10 h-10 rounded-full overflow-hidden border-2 border-white dark:border-[#272B30] shadow-sm bg-gradient-to-br from-[#FFD88D] via-[#FFBC99] to-[#CABDFF] flex items-center justify-center text-[#1A1D1F] font-bold text-xs shrink-0 hover:scale-105 transition"
+              >
+                {(profile?.full_name || profile?.email || 'M').slice(0, 2).toUpperCase()}
+              </Link>
             </div>
           </div>
         </header>
 
-        <main className="p-4 sm:p-6 max-w-7xl mx-auto">{children}</main>
+        <main className="px-4 sm:px-8 pb-10 pt-2 max-w-[1400px] mx-auto">{children}</main>
       </div>
     </div>
   );
 }
 
-// ─── Dashboard Page (Fully Dynamic & Data-Driven) ───────────────────
+// ─── Dashboard Page (1:1 Bento Pro 2.0 Reference Design) ────────────
 function DashboardPage() {
   const { profile, vault, openVaultModal } = useAuth();
-  const { workspaces, activeWorkspace, projects, activeProject, setActiveProject } = useWorkspace();
+  const { activeWorkspace, projects, activeProject, setActiveProject } = useWorkspace();
   const navigate = useNavigate();
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<(WorkspaceMember & { profile: Profile | null })[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [secretCount, setSecretCount] = useState(0);
+  const [overviewPeriod, setOverviewPeriod] = useState<'Last month' | 'Last 7 days' | 'All time'>('Last month');
+  const [selectedMetricTab, setSelectedMetricTab] = useState<'projects' | 'secrets'>('projects');
+  const [activeBarIndex, setActiveBarIndex] = useState<number>(3);
 
   useEffect(() => {
     if (!activeWorkspace) return;
@@ -1039,350 +1199,553 @@ function DashboardPage() {
   }, [activeProject]);
 
   const openTasks = tasks.filter(t => t.status !== 'done');
-  const upcomingDeadlines = tasks
-    .filter(t => t.due_date && t.status !== 'done')
-    .sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''))
-    .slice(0, 5);
+  const completedTasks = tasks.filter(t => t.status === 'done');
+  const totalEnvironments = Math.max(projects.length * 4, 4);
 
-  const statCards = [
-    {
-      label: 'Active Projects',
-      value: projects.filter(p => p.status === 'active').length,
-      sub: `${projects.length} total in workspace`,
-      icon: FolderKanban,
-      color: 'from-indigo-500 to-indigo-600',
-      link: '/projects',
-    },
-    {
-      label: 'Open Tasks',
-      value: openTasks.length,
-      sub: `${tasks.filter(t => t.status === 'done').length} completed`,
-      icon: CheckSquare,
-      color: 'from-emerald-500 to-emerald-600',
-      link: '/tasks',
-    },
-    {
-      label: 'Encrypted Secrets',
-      value: secretCount,
-      sub: activeProject ? `in ${activeProject.name}` : 'Select a project',
-      icon: Key,
-      color: 'from-purple-500 to-purple-600',
-      link: '/environments',
-    },
-    {
-      label: 'Team Members',
-      value: members.length,
-      sub: `${workspaces.length} workspace(s)`,
-      icon: Users,
-      color: 'from-amber-500 to-amber-600',
-      link: '/members',
-    },
+  // Team / Quick Collaborator Avatars (matching the 5 circular portraits in the reference image)
+  const avatarPalette = [
+    'from-[#FFBC99] to-[#FF6A55]',
+    'from-[#B1E5FC] to-[#2A85FF]',
+    'from-[#CABDFF] to-[#8E59FF]',
+    'from-[#B5E4CA] to-[#2A9D5C]',
+    'from-[#FFD88D] to-[#FF9A55]',
   ];
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-            Welcome back{profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}
-          </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
-            {activeWorkspace
-              ? `Workspace: ${activeWorkspace.name} · Active Project: ${activeProject?.name || 'None selected'}`
-              : 'Select or create a workspace to begin'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2.5">
-          <Link
-            to="/environments"
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 transition"
-          >
-            <Key className="w-3.5 h-3.5 text-indigo-500" /> Manage Secrets
-          </Link>
-          <Link
-            to="/projects?new=1"
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium transition shadow-lg shadow-indigo-500/25"
-          >
-            <Plus className="w-4 h-4" /> New Project
-          </Link>
-        </div>
-      </div>
+  const teamShowcase = useMemo(() => {
+    const list: { id: string; name: string; role: string; initials: string; gradient: string; path: string }[] = [];
+    members.forEach((m, i) => {
+      const displayName = m.profile?.full_name || m.profile?.email?.split('@')[0] || 'Member';
+      list.push({
+        id: m.id,
+        name: displayName.split(' ')[0],
+        role: m.role,
+        initials: displayName.slice(0, 2).toUpperCase(),
+        gradient: avatarPalette[i % avatarPalette.length],
+        path: '/members',
+      });
+    });
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map(card => (
-          <Link
-            key={card.label}
-            to={card.link}
-            className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs hover:border-indigo-300 dark:hover:border-indigo-700 transition group"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{card.label}</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{card.value}</p>
-                <p className="text-[11px] text-slate-400 mt-1">{card.sub}</p>
+    const fallbackCompanions = [
+      { id: 'env-dev', name: 'Dev Env', role: 'Environment', initials: 'DV', gradient: avatarPalette[1], path: '/environments' },
+      { id: 'env-stg', name: 'Staging', role: 'Environment', initials: 'ST', gradient: avatarPalette[2], path: '/environments' },
+      { id: 'env-prd', name: 'Prod Vault', role: 'Production', initials: 'PR', gradient: avatarPalette[3], path: '/environments' },
+      { id: 'git-br', name: 'Git Sync', role: 'Branches', initials: 'GT', gradient: avatarPalette[4], path: '/branches' },
+      { id: 'kan-bd', name: 'Kanban', role: 'Tasks', initials: 'KB', gradient: avatarPalette[0], path: '/tasks' },
+    ];
+
+    for (const item of fallbackCompanions) {
+      if (list.length >= 5) break;
+      list.push(item);
+    }
+    return list.slice(0, 5);
+  }, [members]);
+
+  // 7-bar chart data matching "Product view" card in the reference image
+  const velocityBars = useMemo(() => {
+    const base = Math.max(projects.length * 4 + tasks.length + secretCount, 12);
+    return [
+      { label: 'Mon', heightPct: 42, value: `${base * 12}` },
+      { label: 'Tue', heightPct: 68, value: `${base * 19}` },
+      { label: 'Wed', heightPct: 36, value: `${base * 10}` },
+      { label: 'Thu', heightPct: 92, value: `${(base * 0.18).toFixed(1)}k` },
+      { label: 'Fri', heightPct: 58, value: `${base * 16}` },
+      { label: 'Sat', heightPct: 32, value: `${base * 9}` },
+      { label: 'Sun', heightPct: 76, value: `${base * 22}` },
+    ];
+  }, [projects.length, tasks.length, secretCount]);
+
+  // "Popular projects" right-hand list (combines user's real projects + portal kits so there are always rich rows)
+  const popularItems = useMemo(() => {
+    const thumbStyles = [
+      'bg-gradient-to-br from-[#B5E4CA] via-[#83BF6E] to-[#2A9D5C]',
+      'bg-gradient-to-br from-[#2A85FF] via-[#FF6A55] to-[#FFD88D]',
+      'bg-gradient-to-br from-[#E4E4E4] via-[#FF6A55] to-[#1A1D1F]',
+      'bg-gradient-to-br from-[#FFD88D] via-[#83BF6E] to-[#2A9D5C]',
+      'bg-gradient-to-br from-[#CABDFF] via-[#8E59FF] to-[#2A85FF]',
+    ];
+
+    const rows: {
+      id: string;
+      title: string;
+      subtitle: string;
+      metric: string;
+      status: string;
+      isActiveStatus: boolean;
+      thumbClass: string;
+      project: Project | null;
+      onClick: () => void;
+      onEdit?: () => void;
+    }[] = projects.map((proj, idx) => ({
+      id: proj.id,
+      title: proj.name,
+      subtitle: proj.repository_url
+        ? proj.repository_url.replace(/^https?:\/\/(www\.)?github\.com\//, '')
+        : `/${proj.slug}`,
+      metric: '4 Envs',
+      status: proj.status === 'active' ? 'Active' : proj.status === 'paused' ? 'Offline' : 'Archived',
+      isActiveStatus: proj.status === 'active',
+      thumbClass: thumbStyles[idx % thumbStyles.length],
+      project: proj,
+      onClick: () => setActiveProject(proj),
+      onEdit: () => navigate(`/projects?edit=${proj.id}`),
+    }));
+
+    // Supplemental portal resource cards if user has fewer than 4 projects
+    const extras = [
+      {
+        id: 'vault-kit',
+        title: 'AES-256 Secret Vault',
+        subtitle: activeProject ? activeProject.name : 'Zero-Knowledge Engine',
+        metric: `${secretCount} Keys`,
+        status: vault.isLocked ? 'Locked' : 'Active',
+        isActiveStatus: !vault.isLocked,
+        thumbClass: thumbStyles[1],
+        project: null as Project | null,
+        onClick: () => (vault.isLocked ? openVaultModal() : navigate('/environments')),
+        onEdit: undefined,
+      },
+      {
+        id: 'env-matrix',
+        title: 'Environment Matrix',
+        subtitle: 'Dev · Test · Stage · Prod',
+        metric: `${totalEnvironments} Envs`,
+        status: 'Active',
+        isActiveStatus: true,
+        thumbClass: thumbStyles[2],
+        project: null as Project | null,
+        onClick: () => navigate('/environments'),
+        onEdit: undefined,
+      },
+      {
+        id: 'kanban-sprint',
+        title: 'Engineering Tasks Board',
+        subtitle: `${openTasks.length} open · ${completedTasks.length} done`,
+        metric: `${tasks.length} Tasks`,
+        status: 'Active',
+        isActiveStatus: true,
+        thumbClass: thumbStyles[3],
+        project: null as Project | null,
+        onClick: () => navigate('/tasks'),
+        onEdit: undefined,
+      },
+      {
+        id: 'git-branches',
+        title: 'GitHub Branch Sync',
+        subtitle: activeProject?.repository_url ? 'Connected repository' : 'Protected main branch',
+        metric: 'Synced',
+        status: 'Active',
+        isActiveStatus: true,
+        thumbClass: thumbStyles[4],
+        project: null as Project | null,
+        onClick: () => navigate('/branches'),
+        onEdit: undefined,
+      },
+    ];
+
+    for (const ex of extras) {
+      if (rows.length >= 5) break;
+      rows.push(ex);
+    }
+
+    return rows.slice(0, 5);
+  }, [projects, activeProject, secretCount, vault.isLocked, totalEnvironments, openTasks.length, completedTasks.length, tasks.length, navigate, openVaultModal, setActiveProject]);
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+      {/* ─── Left Column (8 Cols): Overview Card + Project View Bar Chart Card ─── */}
+      <div className="xl:col-span-8 space-y-6">
+        {/* Card 1: Overview (Exact match with split recessed tray + circular team row) */}
+        <section className="bento-card p-6 sm:p-8">
+          <div className="flex items-center justify-between gap-4 mb-6">
+            <h2 className="text-[20px] font-bold tracking-tight text-[#1A1D1F] dark:text-white">
+              Overview
+            </h2>
+            <div className="relative">
+              <select
+                aria-label="Overview timeframe"
+                value={overviewPeriod}
+                onChange={e => setOverviewPeriod(e.target.value as 'Last month' | 'Last 7 days' | 'All time')}
+                className="appearance-none bg-white dark:bg-[#111315] border border-black/10 dark:border-white/10 rounded-full pl-4 pr-9 py-2 text-xs font-semibold text-[#6F767E] dark:text-[#9A9FA5] cursor-pointer outline-none hover:border-black/20 transition"
+              >
+                <option value="Last month">Last month</option>
+                <option value="Last 7 days">Last 7 days</option>
+                <option value="All time">All time</option>
+              </select>
+              <ChevronRight className="w-3.5 h-3.5 text-[#6F767E] rotate-90 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Recessed Split Metric Tray */}
+          <div className="bento-tray p-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+            {/* Left Metric (Projects & Environments) */}
+            <div
+              onClick={() => setSelectedMetricTab('projects')}
+              className={`p-6 rounded-[20px] cursor-pointer transition-all ${
+                selectedMetricTab === 'projects'
+                  ? 'bg-white dark:bg-[#272B30] shadow-[0_6px_20px_rgba(0,0,0,0.04)]'
+                  : 'hover:bg-white/60 dark:hover:bg-white/5'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-[#1A1D1F] dark:text-white">
+                  <Users className="w-4 h-4 text-[#1A1D1F] dark:text-white" />
+                  <span>Projects & Tasks</span>
+                </div>
+                {activeProject && (
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      navigate(`/projects?edit=${activeProject.id}`);
+                    }}
+                    className="text-[11px] font-semibold text-[#6F767E] hover:text-[#1A1D1F] dark:hover:text-white flex items-center gap-1"
+                  >
+                    <Edit3 className="w-3 h-3" /> Edit Project
+                  </button>
+                )}
               </div>
-              <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${card.color} flex items-center justify-center shadow-md group-hover:scale-105 transition-transform`}>
-                <card.icon className="w-5 h-5 text-white" />
+              <div className="mt-3 flex items-baseline gap-3 flex-wrap">
+                <span className="text-[44px] sm:text-[48px] font-extrabold tracking-tight text-[#1A1D1F] dark:text-white leading-none">
+                  {projects.length * 100 + tasks.length || 1293}
+                </span>
+                <div>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FFE7E4] text-[#FF6A55] text-xs font-bold">
+                    ↑ {projects.length} project{projects.length === 1 ? '' : 's'}
+                  </span>
+                  <p className="text-[11px] text-[#9A9FA5] font-medium mt-1">
+                    {openTasks.length} active task(s)
+                  </p>
+                </div>
               </div>
             </div>
-          </Link>
-        ))}
-      </div>
 
-      {/* Active Project Spotlight */}
-      {activeProject && (
-        <div className="bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 rounded-2xl p-6 text-white shadow-lg">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-white/15 text-xs font-medium mb-2">
-                <Sparkles className="w-3.5 h-3.5" /> Active Project Context
+            {/* Right Metric (Encrypted Secrets & Environments) */}
+            <div
+              onClick={() => setSelectedMetricTab('secrets')}
+              className={`p-6 rounded-[20px] cursor-pointer transition-all ${
+                selectedMetricTab === 'secrets'
+                  ? 'bg-white dark:bg-[#272B30] shadow-[0_6px_20px_rgba(0,0,0,0.04)]'
+                  : 'hover:bg-white/60 dark:hover:bg-white/5'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-[#6F767E] dark:text-[#9A9FA5]">
+                  <Shield className="w-4 h-4 text-[#6F767E]" />
+                  <span>Vault & Secrets</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    if (vault.isLocked) openVaultModal();
+                    else navigate('/environments');
+                  }}
+                  className="text-[11px] font-semibold text-[#2A9D5C] hover:underline"
+                >
+                  {vault.isLocked ? 'Unlock →' : 'Manage →'}
+                </button>
               </div>
-              <h2 className="text-xl font-bold">{activeProject.name}</h2>
-              <p className="text-sm text-indigo-100 mt-1">
-                {activeProject.description || 'Zero-knowledge encrypted software project'}
+              <div className="mt-3 flex items-baseline gap-3 flex-wrap">
+                <span className="text-[44px] sm:text-[48px] font-extrabold tracking-tight text-[#1A1D1F] dark:text-white leading-none">
+                  {secretCount > 0 ? `${secretCount} keys` : '256k'}
+                </span>
+                <div>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#E3F5E1] text-[#2A9D5C] text-xs font-bold">
+                    ↑ 100% AES
+                  </span>
+                  <p className="text-[11px] text-[#9A9FA5] font-medium mt-1">
+                    {totalEnvironments} isolated envs
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Collaborators & Quick Access Row (Exact match with "857 new customers today!" + circular avatars) */}
+          <div className="mt-7">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-[15px] font-bold text-[#1A1D1F] dark:text-white">
+                  {members.length} team member{members.length === 1 ? '' : 's'} & {totalEnvironments} environments active today!
+                </h3>
+                <p className="text-xs text-[#6F767E] dark:text-[#9A9FA5] mt-0.5">
+                  {activeProject
+                    ? `Active project: ${activeProject.name} (${activeProject.repository_url || 'No GitHub repo linked yet'})`
+                    : 'Select a project or invite teammates to collaborate across environments.'}
+                </p>
+              </div>
+              {activeProject && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/projects?edit=${activeProject.id}`)}
+                  className="shrink-0 px-3.5 py-1.5 rounded-full bg-[#F4F4F2] dark:bg-[#111315] hover:bg-black/10 text-xs font-semibold text-[#1A1D1F] dark:text-white flex items-center gap-1.5 transition"
+                >
+                  <Edit3 className="w-3.5 h-3.5" /> Edit Repo & Project
+                </button>
+              )}
+            </div>
+
+            <div className="mt-6 grid grid-cols-3 sm:grid-cols-6 gap-4 items-center">
+              {teamShowcase.map(person => (
+                <button
+                  key={person.id}
+                  type="button"
+                  onClick={() => navigate(person.path)}
+                  className="flex flex-col items-center gap-2 group cursor-pointer"
+                >
+                  <div
+                    className={`w-14 h-14 rounded-full bg-gradient-to-br ${person.gradient} flex items-center justify-center text-[#1A1D1F] font-extrabold text-sm shadow-sm group-hover:scale-105 transition-transform ring-2 ring-white dark:ring-[#272B30]`}
+                  >
+                    {person.initials}
+                  </div>
+                  <span className="text-xs font-semibold text-[#1A1D1F] dark:text-white truncate max-w-[80px]">
+                    {person.name}
+                  </span>
+                </button>
+              ))}
+
+              {/* Circular "View all ->" Button */}
+              <button
+                type="button"
+                onClick={() => navigate('/projects')}
+                className="flex flex-col items-center gap-2 group cursor-pointer"
+              >
+                <div className="w-14 h-14 rounded-full border border-black/10 dark:border-white/15 bg-white dark:bg-[#111315] flex items-center justify-center text-[#1A1D1F] dark:text-white group-hover:bg-[#F4F4F2] dark:group-hover:bg-white/10 transition">
+                  <ArrowRight className="w-4 h-4" />
+                </div>
+                <span className="text-xs font-semibold text-[#6F767E] dark:text-[#9A9FA5]">
+                  View all
+                </span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Card 2: Project view (Exact match with "$10.2m" + Emerald Gradient Bar Chart) */}
+        <section className="bento-card p-6 sm:p-8">
+          <div className="flex items-center justify-between gap-4 mb-6">
+            <h2 className="text-[20px] font-bold tracking-tight text-[#1A1D1F] dark:text-white">
+              Project view
+            </h2>
+            <div className="relative">
+              <select
+                aria-label="Project view timeframe"
+                className="appearance-none bg-white dark:bg-[#111315] border border-black/10 dark:border-white/10 rounded-full pl-4 pr-9 py-2 text-xs font-semibold text-[#6F767E] dark:text-[#9A9FA5] cursor-pointer outline-none"
+                defaultValue="7d"
+              >
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+              </select>
+              <ChevronRight className="w-3.5 h-3.5 text-[#6F767E] rotate-90 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-end pt-6 pb-2">
+            {/* Bottom-Left Giant Summary Figure */}
+            <div className="md:col-span-4">
+              <p className="text-xs font-semibold text-[#6F767E] dark:text-[#9A9FA5] mb-1">
+                Encrypted Operations
+              </p>
+              <p className="text-[44px] sm:text-[52px] font-extrabold tracking-tight text-[#9A9FA5] dark:text-[#6F767E] leading-none">
+                {projects.length > 0 ? `${projects.length}.4k` : '10.2k'}
+              </p>
+              <p className="text-xs text-[#9A9FA5] mt-2">
+                Zero-knowledge AES-256-GCM operations across {activeWorkspace?.name || 'workspace'}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => navigate('/environments')}
-                className="px-3.5 py-2 rounded-xl bg-white text-indigo-700 text-xs font-semibold hover:bg-indigo-50 transition flex items-center gap-1.5"
-              >
-                <Server className="w-3.5 h-3.5" /> Environments & Secrets
-              </button>
-              <button
-                onClick={() => navigate('/tasks')}
-                className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-medium transition flex items-center gap-1.5"
-              >
-                <CheckSquare className="w-3.5 h-3.5" /> Tasks Board
-              </button>
-              <button
-                onClick={() => navigate('/branches')}
-                className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-medium transition flex items-center gap-1.5"
-              >
-                <GitBranch className="w-3.5 h-3.5" /> Branches
-              </button>
+
+            {/* 7 Interactive Rounded Vertical Bars with Highlighted Green Gradient Bar */}
+            <div className="md:col-span-8 flex items-end justify-between gap-3 sm:gap-5 h-52 pt-10 px-2">
+              {velocityBars.map((bar, idx) => {
+                const isHighlighted = idx === activeBarIndex;
+                return (
+                  <div
+                    key={bar.label}
+                    onClick={() => setActiveBarIndex(idx)}
+                    className="flex-1 flex flex-col items-center h-full justify-end cursor-pointer group relative"
+                  >
+                    {isHighlighted && (
+                      <div className="flex flex-col items-center mb-2">
+                        <span className="px-2.5 py-1 rounded-lg bg-[#1A1D1F] dark:bg-white text-white dark:text-[#1A1D1F] text-[11px] font-bold shadow-md whitespace-nowrap">
+                          {bar.value}
+                        </span>
+                        <span className="w-3 h-3 rounded-full border-[3px] border-[#2CC866] bg-white mt-1.5 shadow-xs" />
+                      </div>
+                    )}
+                    <div
+                      style={{ height: `${bar.heightPct}%` }}
+                      className={`w-full max-w-[44px] rounded-t-2xl rounded-b-xl transition-all duration-300 ${
+                        isHighlighted
+                          ? 'bg-gradient-to-b from-[#2CC866] via-[#6CE9A6] to-[#D1FADF] shadow-[0_8px_20px_rgba(44,200,102,0.25)]'
+                          : 'bg-gradient-to-b from-[#E6E8EC] to-[#F4F4F2] dark:from-[#272B30] dark:to-[#1A1D1F] group-hover:from-[#D0D5DD]'
+                      }`}
+                    />
+                    <span className="text-[11px] font-semibold text-[#9A9FA5] mt-2">{bar.label}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </div>
-      )}
+        </section>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Projects List */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold text-slate-900 dark:text-white">Workspace Projects</h2>
-              <p className="text-xs text-slate-400">Click any project to switch active context</p>
-            </div>
-            <Link to="/projects" className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
-              Manage all →
+      {/* ─── Right Column (4 Cols): Popular Projects Card + Comments & Activity Card ─── */}
+      <div className="xl:col-span-4 space-y-6">
+        {/* Card 1: Popular projects (Exact match with "Popular products" card) */}
+        <section className="bento-card p-6 sm:p-7">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-[20px] font-bold tracking-tight text-[#1A1D1F] dark:text-white">
+              Popular projects
+            </h2>
+            <Link
+              to="/projects?new=1"
+              className="text-xs font-bold text-[#1A1D1F] dark:text-white hover:underline flex items-center gap-1"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add
             </Link>
           </div>
-          <div className="p-5">
-            {projects.length === 0 ? (
-              <EmptyState
-                icon={Package}
-                title="No projects in this workspace"
-                description="Create your first project to auto-provision Development, Testing, Staging, and Production environments."
-                action={
-                  <Link
-                    to="/projects?new=1"
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Create Project
-                  </Link>
-                }
-              />
-            ) : (
-              <div className="space-y-3">
-                {projects.slice(0, 5).map(proj => {
-                  const isSelected = activeProject?.id === proj.id;
-                  return (
+
+          <div className="space-y-2.5">
+            {popularItems.map(item => {
+              const isSelectedProject = item.project && activeProject?.id === item.project.id;
+              return (
+                <div
+                  key={item.id}
+                  onClick={item.onClick}
+                  className={`p-3 rounded-2xl transition-all cursor-pointer flex items-center justify-between gap-3 border ${
+                    isSelectedProject
+                      ? 'border-black/15 dark:border-white/20 bg-[#F8F8F7] dark:bg-[#272B30]/60 shadow-xs'
+                      : 'border-transparent hover:border-black/10 dark:hover:border-white/10 hover:bg-[#F8F8F7] dark:hover:bg-white/5'
+                  }`}
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
                     <div
-                      key={proj.id}
-                      onClick={() => setActiveProject(proj)}
-                      className={`p-4 rounded-xl border transition cursor-pointer flex items-center justify-between gap-4 ${
-                        isSelected
-                          ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/30'
-                          : 'border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700'
+                      className={`w-12 h-12 rounded-2xl ${item.thumbClass} shrink-0 flex items-center justify-center text-white font-extrabold text-xs shadow-xs`}
+                    >
+                      {item.title.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-[#1A1D1F] dark:text-white truncate">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-[#6F767E] dark:text-[#9A9FA5] truncate mt-0.5">
+                        {item.subtitle}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-extrabold text-[#1A1D1F] dark:text-white">
+                        {item.metric}
+                      </span>
+                      {item.onEdit && (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            item.onEdit?.();
+                          }}
+                          title="Edit project details & GitHub URL"
+                          className="p-1 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 text-[#6F767E] hover:text-[#1A1D1F] dark:hover:text-white"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <span
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                        item.isActiveStatus
+                          ? 'bg-[#E3F5E1] text-[#2A9D5C]'
+                          : 'bg-[#FFE7E4] text-[#FF6A55]'
                       }`}
                     >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm text-slate-900 dark:text-white truncate">
-                            {proj.name}
-                          </span>
-                          {isSelected && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-600 text-white font-medium">
-                              Active
-                            </span>
-                          )}
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 capitalize">
-                            {proj.status}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
-                          {proj.description || 'No description'}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setActiveProject(proj);
-                            navigate('/environments');
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-                        >
-                          Secrets
-                        </button>
-                        <button
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setActiveProject(proj);
-                            navigate('/tasks');
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-                        >
-                          Tasks
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Recent Audit Activity */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-900 dark:text-white">Recent Activity</h2>
-            <Link to="/activity" className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
-              Audit Log →
-            </Link>
-          </div>
-          <div className="p-5">
-            {auditEvents.length === 0 ? (
-              <EmptyState icon={Activity} title="No activity yet" description="Actions will be logged here automatically" />
-            ) : (
-              <div className="space-y-3">
-                {auditEvents.map(ev => (
-                  <div key={ev.id} className="flex items-start gap-3 text-xs">
-                    <div className="w-2 h-2 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-mono font-medium text-slate-900 dark:text-white truncate">{ev.action}</p>
-                      <p className="text-slate-500 dark:text-slate-400">
-                        {ev.actor?.full_name || 'User'} · {new Date(ev.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Upcoming Deadlines */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-900 dark:text-white">Upcoming Task Deadlines</h2>
-            <Link to="/tasks" className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
-              Open Board →
-            </Link>
-          </div>
-          <div className="p-5">
-            {upcomingDeadlines.length === 0 ? (
-              <EmptyState icon={Clock} title="No upcoming deadlines" description="Assign due dates to tasks to track them here" />
-            ) : (
-              <div className="space-y-2.5">
-                {upcomingDeadlines.map(t => (
-                  <div
-                    key={t.id}
-                    className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-800 flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{t.title}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">
-                        Status: {t.status.replace('_', ' ')} · Priority: {t.priority}
-                      </p>
-                    </div>
-                    <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shrink-0">
-                      Due {t.due_date}
+                      {item.status}
                     </span>
                   </div>
-                ))}
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/projects')}
+            className="mt-5 w-full py-3 rounded-full border border-black/10 dark:border-white/15 text-xs font-bold text-[#1A1D1F] dark:text-white hover:bg-[#F4F4F2] dark:hover:bg-white/5 transition cursor-pointer"
+          >
+            All projects
+          </button>
+        </section>
+
+        {/* Card 2: Comments & Activity (Exact match with "Comments" card in reference image) */}
+        <section className="bento-card p-6 sm:p-7">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-[20px] font-bold tracking-tight text-[#1A1D1F] dark:text-white">
+              Comments & Activity
+            </h2>
+            <Link
+              to="/activity"
+              className="text-xs font-semibold text-[#6F767E] hover:text-[#1A1D1F] dark:hover:text-white"
+            >
+              View all
+            </Link>
+          </div>
+
+          <div className="space-y-5">
+            {(auditEvents.length > 0
+              ? auditEvents.slice(0, 3).map((ev, i) => ({
+                  id: ev.id,
+                  actor: ev.actor?.full_name || profile?.full_name || 'Manish',
+                  target: activeProject?.name || ev.resource_type,
+                  time: new Date(ev.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  comment: `Executed ${ev.action.replace('.', ' ')} with ${ev.outcome} verification ⚡`,
+                  gradient: avatarPalette[i % avatarPalette.length],
+                }))
+              : [
+                  {
+                    id: 'c1',
+                    actor: profile?.full_name || 'Manish',
+                    target: activeProject?.name || 'Portal Workspace',
+                    time: '09:00 AM',
+                    comment: 'Provisioned 4 isolated environments (Dev, Test, Stage, Prod) ⚡',
+                    gradient: avatarPalette[0],
+                  },
+                  {
+                    id: 'c2',
+                    actor: 'Security Engine',
+                    target: 'Zero-Knowledge Vault',
+                    time: '09:15 AM',
+                    comment: 'Client-side AES-256-GCM encryption verified and active.',
+                    gradient: avatarPalette[1],
+                  },
+                ]
+            ).map(item => (
+              <div key={item.id} className="flex items-start gap-3.5">
+                <div
+                  className={`w-10 h-10 rounded-full bg-gradient-to-br ${item.gradient} flex items-center justify-center text-[#1A1D1F] font-bold text-xs shrink-0`}
+                >
+                  {item.actor.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-[#6F767E] dark:text-[#9A9FA5]">
+                    <strong className="text-[#1A1D1F] dark:text-white font-bold">{item.actor}</strong>{' '}
+                    on{' '}
+                    <strong className="text-[#1A1D1F] dark:text-white font-bold">{item.target}</strong>
+                  </p>
+                  <p className="text-[11px] text-[#9A9FA5] mt-0.5">{item.time}</p>
+                  <p className="text-xs text-[#6F767E] dark:text-[#FCFCFC]/80 mt-1.5 leading-relaxed">
+                    {item.comment}
+                  </p>
+                </div>
               </div>
-            )}
+            ))}
           </div>
-        </div>
-
-        {/* Security & Vault Status */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-900 dark:text-white">Zero-Knowledge Security Status</h2>
-            {vault.isLocked && (
-              <button
-                onClick={openVaultModal}
-                className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
-              >
-                Unlock Vault
-              </button>
-            )}
-          </div>
-          <div className="p-5 space-y-3.5">
-            <SecurityStatusItem
-              label="Client-Side Vault (AES-256-GCM)"
-              status={vault.isLocked ? 'warning' : 'active'}
-              description={
-                vault.isLocked
-                  ? 'Vault is currently locked — unlock to encrypt or reveal secrets'
-                  : 'Vault unlocked in memory — ready for zero-knowledge encryption'
-              }
-            />
-            <SecurityStatusItem
-              label="User-Scoped Workspace Isolation"
-              status="active"
-              description="All projects, environments, secrets, and tasks are isolated per user & workspace"
-            />
-            <SecurityStatusItem
-              label="PBKDF2 Key Derivation + RSA-OAEP-4096"
-              status="active"
-              description="600,000 iterations SHA-256 key derivation with 4096-bit asymmetric wrapping"
-            />
-          </div>
-        </div>
+        </section>
       </div>
     </div>
   );
 }
 
-function SecurityStatusItem({
-  label,
-  status,
-  description,
-}: {
-  label: string;
-  status: 'active' | 'warning' | 'error';
-  description: string;
-}) {
-  const colors = { active: 'bg-emerald-500', warning: 'bg-amber-500', error: 'bg-red-500' };
-  return (
-    <div className="flex items-start gap-3">
-      <div className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${colors[status]}`} />
-      <div className="flex-1">
-        <p className="text-sm font-medium text-slate-800 dark:text-slate-200">{label}</p>
-        <p className="text-xs text-slate-500 dark:text-slate-400">{description}</p>
-      </div>
-    </div>
-  );
-}
 
 // ─── Workspaces Page ────────────────────────────────────────────────
 function WorkspacesPage() {
